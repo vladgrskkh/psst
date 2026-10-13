@@ -38,21 +38,14 @@ func readReplies() (map[string]json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return decodeReplies(data)
-}
-
-func decodeReplies(data []byte) (map[string]json.RawMessage, error) {
 	var replies map[string]json.RawMessage
-	if err := json.Unmarshal(data, &replies); err != nil {
-		return nil, err
-	}
-	return replies, nil
+	return replies, json.Unmarshal(data, &replies)
 }
 
 func serve(scanner *bufio.Scanner, replies map[string]json.RawMessage) error {
 	for scanner.Scan() {
-		req, err := decodeRequest(scanner.Bytes())
-		if err != nil {
+		var req bridgeRequest
+		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
 			continue
 		}
 		reply, ok := replies[req.Method]
@@ -68,14 +61,6 @@ func serve(scanner *bufio.Scanner, replies map[string]json.RawMessage) error {
 		fmt.Fprintln(os.Stdout, string(out))
 	}
 	return scanner.Err()
-}
-
-func decodeRequest(data []byte) (bridgeRequest, error) {
-	var req bridgeRequest
-	if err := json.Unmarshal(data, &req); err != nil {
-		return req, err
-	}
-	return req, nil
 }
 
 func extractError(reply json.RawMessage) any {
