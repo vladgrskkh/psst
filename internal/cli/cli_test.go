@@ -83,9 +83,8 @@ func TestNewRequiresExactlyOneCaptureArgument(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // configureCLI calls t.Setenv, which cannot run in parallel.
 func TestNewCreatesTodoAndRunsOneFullSync(t *testing.T) {
-	t.Parallel()
-
 	configureCLI(t)
 	cmd := newRootCommand()
 	var stdout, stderr bytes.Buffer
@@ -101,9 +100,8 @@ func TestNewCreatesTodoAndRunsOneFullSync(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // configureCLI calls t.Setenv, which cannot run in parallel.
 func TestNewKeepsLocalSuccessWhenSyncFails(t *testing.T) {
-	t.Parallel()
-
 	configureCLI(t)
 	cmd := newRootCommand()
 	var stdout, stderr bytes.Buffer
@@ -118,9 +116,8 @@ func TestNewKeepsLocalSuccessWhenSyncFails(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // configureCLI calls t.Setenv, which cannot run in parallel.
 func TestInvalidCaptureDoesNotCreateApplication(t *testing.T) {
-	t.Parallel()
-
 	dbPath := configureCLI(t)
 	cmd := newRootCommand()
 	cmd.SetArgs([]string{"new", "@tomorrow"})
