@@ -8,10 +8,12 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
 	"github.com/vladgrskkh/psst/internal/app"
 	"github.com/vladgrskkh/psst/internal/quickcapture"
+	"github.com/vladgrskkh/psst/internal/ui"
 )
 
 const (
@@ -20,7 +22,7 @@ const (
 	runtimeErrorExitCode = 1
 )
 
-var errUsage = errors.New("usage: psst new \"<text>\" | psst --version")
+var errUsage = errors.New("usage: psst | psst new \"<text>\" | psst --version")
 
 // Execute runs psst with args and returns the process exit code.
 func Execute(args []string, stdout, stderr io.Writer) int {
@@ -47,11 +49,23 @@ func newRootCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			_, err := fmt.Fprintln(
-				cmd.OutOrStdout(),
-				"psst: the TUI lands in plan 2 — try `psst new \"buy milk @tomorrow 9:00\"`",
+			cfg, err := app.LoadConfig()
+			if err != nil {
+				return err
+			}
+			application, err := app.New(cfg)
+			if err != nil {
+				return err
+			}
+			program := tea.NewProgram(
+				ui.NewDashboard(application.TodoService, cfg.Theme, cfg.Keys, time.Now()),
+				tea.WithContext(cmd.Context()),
+				tea.WithInput(cmd.InOrStdin()),
+				tea.WithOutput(cmd.OutOrStdout()),
+				tea.WithAltScreen(),
 			)
-			return err
+			_, err = program.Run()
+			return errors.Join(err, application.Close())
 		},
 	}
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {

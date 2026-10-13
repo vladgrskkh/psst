@@ -28,7 +28,7 @@ internal/infra/        port implementations: store/ (bbolt), reminders/ (bridge 
 internal/config/       config + theme loading
 internal/dateparser/   natural date parsing
 internal/quickcapture/ one-line quick-capture grammar
-internal/ui/           TUI (plan 2 — not present yet)
+internal/ui/           TUI presentation (dashboard; further views in later slices)
 ```
 
 Dependency rule: `pkg/option + domain ← service ← cli`; `app` wires service and
@@ -81,3 +81,4 @@ make run/psst       # go run ./cmd/psst
 
 - Spec: `docs/superpowers/specs/2026-08-16-psst-core-tui-design.md`
 - Implementation plan (core): `docs/superpowers/plans/2026-08-16-psst-core.md`
+- Current TUI slice: `docs/superpowers/plans/2026-10-13-psst-tui-dashboard.md`

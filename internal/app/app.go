@@ -37,13 +37,15 @@ func LoadConfig() (*config.Config, error) {
 	return cfg, nil
 }
 
-// App holds the wired services and resources for one CLI invocation.
+// App holds the wired services and resources for one CLI or TUI session.
 type App struct {
 	// CaptureService is the wired quick-capture use case.
 	CaptureService *service.CaptureService
-	logger         *slog.Logger
-	logFile        *os.File
-	db             io.Closer
+	// TodoService reads and changes the locally stored todos.
+	TodoService *service.TodoService
+	logger      *slog.Logger
+	logFile     *os.File
+	db          io.Closer
 }
 
 // New opens persistence and constructs the application services for cfg.
@@ -70,6 +72,7 @@ func New(cfg *config.Config) (*App, error) {
 
 	todoStore := store.NewTodoStore(db)
 	clock := systemClock{}
+	todos := service.NewTodoService(todoStore, clock)
 	reminderClient := reminders.NewClient(logger)
 	engine := service.NewSyncEngine(
 		todoStore,
@@ -81,8 +84,9 @@ func New(cfg *config.Config) (*App, error) {
 	)
 	syncer := service.NewSyncService(engine, time.Duration(cfg.General.PushDebounceMs)*time.Millisecond)
 	return &App{
+		TodoService: todos,
 		CaptureService: service.NewCaptureService(
-			service.NewTodoService(todoStore, clock),
+			todos,
 			permissionChecker{client: reminderClient},
 			syncer,
 			cfg.General.DefaultList,

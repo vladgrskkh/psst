@@ -1,0 +1,230 @@
+// Package ui presents the read-only todo dashboard.
+package ui
+
+import (
+	"cmp"
+	"fmt"
+	"slices"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/vladgrskkh/psst/internal/config"
+	"github.com/vladgrskkh/psst/internal/domain"
+)
+
+// TodoLister supplies the dashboard's local snapshot.
+type TodoLister interface {
+	List(string) ([]*domain.Todo, error)
+}
+
+// Dashboard is the read-only dashboard model.
+type Dashboard struct {
+	reader TodoLister
+	now    time.Time
+	keys   config.KeysConfig
+	styles dashboardStyles
+	rows   []dashboardRow
+	cursor int
+	offset int
+	width  int
+	height int
+	help   string
+}
+
+type dashboardRow struct {
+	text       string
+	style      lipgloss.Style
+	selectable bool
+}
+
+type todosLoaded struct {
+	todos []*domain.Todo
+	err   error
+}
+
+const (
+	overdueGroup = iota
+	todayGroup
+	tomorrowGroup
+	laterGroup
+	groupCount
+)
+
+const (
+	defaultWidth  = 80
+	defaultHeight = 24
+	chromeHeight  = 2
+)
+
+// NewDashboard constructs the dashboard with a fixed launch reference time.
+func NewDashboard(reader TodoLister, theme config.ThemeConfig, keys config.KeysConfig, now time.Time) Dashboard {
+	styles := newDashboardStyles(theme)
+	return Dashboard{
+		reader: reader,
+		now:    now,
+		keys: config.KeysConfig{
+			Up: slices.Clone(keys.Up), Down: slices.Clone(keys.Down), Quit: slices.Clone(keys.Quit),
+		},
+		styles: styles,
+		rows:   []dashboardRow{{text: "Loading todos…", style: styles.muted}},
+		cursor: -1,
+		width:  defaultWidth,
+		height: defaultHeight,
+		help:   dashboardHelp(keys),
+	}
+}
+
+// Init returns the initial snapshot-loading command.
+func (m Dashboard) Init() tea.Cmd {
+	return func() tea.Msg {
+		todos, err := m.reader.List("")
+		return todosLoaded{todos: todos, err: err}
+	}
+}
+
+// Update handles dashboard messages.
+func (m Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case todosLoaded:
+		m.cursor, m.offset = -1, 0
+		if msg.err != nil {
+			m.rows = []dashboardRow{{
+				text: "Could not load todos: " + singleLine(msg.err.Error()), style: m.styles.error,
+			}}
+		} else {
+			m.rows, m.cursor = m.dashboardRows(msg.todos)
+		}
+	case tea.WindowSizeMsg:
+		m.width, m.height = max(0, msg.Width), max(0, msg.Height)
+	case tea.KeyMsg:
+		name := msg.String()
+		if name == " " {
+			name = "space"
+		}
+		switch {
+		case slices.Contains(m.keys.Quit, name):
+			return m, tea.Quit
+		case slices.Contains(m.keys.Up, name):
+			m.cursor = m.nextCursor(-1)
+		case slices.Contains(m.keys.Down, name):
+			m.cursor = m.nextCursor(1)
+		}
+	}
+	m.offset = m.visibleOffset()
+	return m, nil
+}
+
+func (m Dashboard) dashboardRows(todos []*domain.Todo) ([]dashboardRow, int) {
+	var groups [groupCount][]domain.Todo
+	done, open := 0, 0
+	for _, todo := range todos {
+		if todo == nil || todo.Deleted {
+			continue
+		}
+		if todo.Done {
+			done++
+			continue
+		}
+		group := deadlineGroup(*todo, m.now)
+		groups[group] = append(groups[group], *todo)
+		open++
+	}
+	rows := make([]dashboardRow, 0, open+groupCount+1)
+	cursor := -1
+	if open == 0 {
+		message := "No todos."
+		if done > 0 {
+			message = "No open todos."
+		}
+		rows = append(rows, dashboardRow{text: message, style: m.styles.muted})
+	}
+	for group, label := range [groupCount]string{"OVERDUE", "TODAY", "TOMORROW", "LATER"} {
+		slices.SortFunc(groups[group], compareTodos)
+		rows = append(rows, dashboardRow{
+			text: fmt.Sprintf("%s (%d)", label, len(groups[group])), style: m.styles.groups[group],
+		})
+		for _, todo := range groups[group] {
+			if cursor < 0 {
+				cursor = len(rows)
+			}
+			rows = append(rows, dashboardRow{
+				text: "[ ] " + singleLine(todo.Title), style: m.styles.text, selectable: true,
+			})
+		}
+	}
+	rows = append(rows, dashboardRow{text: fmt.Sprintf("DONE (%d) · collapsed", done), style: m.styles.muted})
+	return rows, cursor
+}
+
+func (m Dashboard) nextCursor(direction int) int {
+	if m.cursor < 0 {
+		return m.cursor
+	}
+	for row := m.cursor + direction; row >= 0 && row < len(m.rows); row += direction {
+		if m.rows[row].selectable {
+			return row
+		}
+	}
+	return m.cursor
+}
+
+func (m Dashboard) visibleOffset() int {
+	height := m.contentHeight()
+	if height == 0 {
+		return m.offset
+	}
+	offset := m.offset
+	if m.cursor >= 0 {
+		if m.cursor < offset {
+			offset = m.cursor
+		} else if m.cursor >= offset+height {
+			offset = m.cursor - height + 1
+		}
+		// At the final selectable todo, reveal trailing sections without hiding the cursor.
+		if m.nextCursor(1) == m.cursor {
+			offset = min(m.cursor, max(0, len(m.rows)-height))
+		}
+	}
+	return min(max(0, offset), max(0, len(m.rows)-height))
+}
+
+func deadlineGroup(todo domain.Todo, now time.Time) int {
+	deadline, present := todo.Deadline.Get()
+	if !present {
+		return laterGroup
+	}
+	if deadline.Before(now) {
+		return overdueGroup
+	}
+	local := deadline.In(now.Location())
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tomorrow := start.AddDate(0, 0, 1)
+	if local.Before(tomorrow) {
+		return todayGroup
+	}
+	if local.Before(tomorrow.AddDate(0, 0, 1)) {
+		return tomorrowGroup
+	}
+	return laterGroup
+}
+
+// compareTodos orders deadlines first, then titles and IDs to break ties.
+func compareTodos(a, b domain.Todo) int {
+	aDue, aPresent := a.Deadline.Get()
+	bDue, bPresent := b.Deadline.Get()
+	if aPresent != bPresent {
+		if aPresent {
+			return -1
+		}
+		return 1
+	}
+	if order := aDue.Compare(bDue); order != 0 {
+		return order
+	}
+	if order := cmp.Compare(a.Title, b.Title); order != 0 {
+		return order
+	}
+	return cmp.Compare(a.ID, b.ID)
+}

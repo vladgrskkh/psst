@@ -3,12 +3,16 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	bolt "go.etcd.io/bbolt"
 
 	"github.com/vladgrskkh/psst/internal/quickcapture"
 )
@@ -29,18 +33,74 @@ func TestVersionCommand(t *testing.T) {
 	}
 }
 
-func TestNoArgsPrintsPlanNote(t *testing.T) {
-	t.Parallel()
-
+//nolint:paralleltest // configureCLI changes the configuration environment.
+func TestNoArgsOpensDashboard(t *testing.T) {
+	dbPath := configureCLI(t)
 	cmd := newRootCommand()
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
+	cmd.SetIn(strings.NewReader("q"))
+	cmd.SetArgs([]string{})
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "plan 2") {
-		t.Fatalf("output = %q", stdout.String())
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("dashboard did not open local persistence: %v", err)
 	}
+	if strings.Contains(stdout.String(), "plan 2") || !strings.Contains(stdout.String(), "psst") {
+		t.Fatalf("dashboard output = %q", stdout.String())
+	}
+	requireClosedDatabase(t, dbPath)
+}
+
+//nolint:paralleltest // configureCLI changes the configuration environment.
+func TestNoArgsReturnsConfigError(t *testing.T) {
+	dbPath := configureCLI(t)
+	path := filepath.Join(filepath.Dir(dbPath), "config.toml")
+	if err := os.WriteFile(path, []byte("[unterminated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newRootCommand()
+	cmd.SetArgs([]string{})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("dashboard opened with invalid configuration")
+	}
+	if _, err := os.Stat(dbPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("invalid config opened persistence: %v", err)
+	}
+}
+
+//nolint:paralleltest // configureCLI changes the configuration environment.
+func TestNoArgsReportsDatabaseOpenFailure(t *testing.T) {
+	dbPath := configureCLI(t)
+	dir := filepath.Dir(dbPath)
+	configPath := filepath.Join(dir, "config.toml")
+	content := fmt.Sprintf("[general]\ndb_path = %q\n", dir)
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Execute([]string{}, &stdout, &stderr); code != runtimeErrorExitCode {
+		t.Fatalf("database-open failure exit code = %d; want %d", code, runtimeErrorExitCode)
+	}
+	if !strings.Contains(stderr.String(), "open bbolt db") {
+		t.Fatalf("startup error did not report the database failure: %q", stderr.String())
+	}
+}
+
+//nolint:paralleltest // configureCLI changes the configuration environment.
+func TestNoArgsClosesDatabaseAfterCancellation(t *testing.T) {
+	dbPath := configureCLI(t)
+	cmd := newRootCommand()
+	cmd.SetArgs([]string{})
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&bytes.Buffer{})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := cmd.ExecuteContext(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("dashboard cancellation = %v; want context.Canceled", err)
+	}
+	requireClosedDatabase(t, dbPath)
 }
 
 func TestExecuteUnknownCommandReturnsUsageExitCode(t *testing.T) {
@@ -140,4 +200,19 @@ func configureCLI(t *testing.T) string {
 	}
 	t.Setenv("PSST_CONFIG", configPath)
 	return dbPath
+}
+
+func requireClosedDatabase(t *testing.T, path string) {
+	t.Helper()
+	var db *bolt.DB
+	{
+		var err error
+		db, err = bolt.Open(path, 0o600, &bolt.Options{Timeout: time.Second})
+		if err != nil {
+			t.Fatalf("dashboard retained database lock: %v", err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
