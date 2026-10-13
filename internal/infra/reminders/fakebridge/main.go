@@ -11,13 +11,13 @@ import (
 func main() {
 	var replies map[string]json.RawMessage
 	//nolint:gosec // The test harness sets this to a temporary fixture path.
-	data, readErr := os.ReadFile(os.Getenv("FAKE_BRIDGE_SCRIPT"))
-	if readErr != nil {
-		fmt.Fprintln(os.Stderr, readErr)
+	data, err := os.ReadFile(os.Getenv("FAKE_BRIDGE_SCRIPT"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if decodeErr := json.Unmarshal(data, &replies); decodeErr != nil {
-		fmt.Fprintln(os.Stderr, decodeErr)
+	if err = json.Unmarshal(data, &replies); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	scanner := bufio.NewScanner(os.Stdin)
@@ -27,7 +27,7 @@ func main() {
 			Method string          `json:"method"`
 			Params json.RawMessage `json:"params"`
 		}
-		if requestErr := json.Unmarshal(scanner.Bytes(), &req); requestErr != nil {
+		if err = json.Unmarshal(scanner.Bytes(), &req); err != nil {
 			continue
 		}
 		reply, ok := replies[req.Method]
@@ -42,11 +42,12 @@ func main() {
 		out, _ := json.Marshal(map[string]any{"id": req.ID, "result": reply})
 		fmt.Fprintln(os.Stdout, string(out))
 	}
-	if scanErr := scanner.Err(); scanErr != nil {
-		fmt.Fprintln(os.Stderr, scanErr)
+	if err = scanner.Err(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if exitCode, err := strconv.Atoi(os.Getenv("FAKE_BRIDGE_EXIT_CODE")); err == nil && exitCode != 0 {
+	exitCode, err := strconv.Atoi(os.Getenv("FAKE_BRIDGE_EXIT_CODE"))
+	if err == nil && exitCode != 0 {
 		os.Exit(exitCode)
 	}
 }
