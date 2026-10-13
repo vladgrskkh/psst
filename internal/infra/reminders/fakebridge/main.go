@@ -46,7 +46,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, scanErr)
 		os.Exit(1)
 	}
-	if exitCode, parseErr := strconv.Atoi(os.Getenv("FAKE_BRIDGE_EXIT_CODE")); parseErr == nil && exitCode != 0 {
+	if exitCode, err := strconv.Atoi(os.Getenv("FAKE_BRIDGE_EXIT_CODE")); err == nil && exitCode != 0 {
 		os.Exit(exitCode)
 	}
 }
