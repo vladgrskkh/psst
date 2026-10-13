@@ -1,0 +1,6 @@
+bin/
+my.db
+debug.log
+.superpowers/
+.worktrees/
+psst
