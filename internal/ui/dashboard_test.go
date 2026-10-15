@@ -31,6 +31,14 @@ func (r *todoReader) List(filter string) ([]*domain.Todo, error) {
 	return r.todos, r.err
 }
 
+func (r *todoReader) ToggleDone(string) (*domain.Todo, error) {
+	return nil, errors.New("unexpected toggle in listing test")
+}
+
+func (r *todoReader) Delete(string) error {
+	return errors.New("unexpected delete in listing test")
+}
+
 func TestDashboardLoadsOnlyThroughInitCommand(t *testing.T) {
 	t.Parallel()
 	r := &todoReader{todos: []*domain.Todo{{ID: "1", Title: "buy milk"}}}
@@ -53,10 +61,10 @@ func TestDashboardLoadsOnlyThroughInitCommand(t *testing.T) {
 		t.Fatalf("load should list one unfiltered snapshot: calls=%d filter=%q", r.calls, r.filter)
 	}
 	assertSelected(t, m, "buy milk")
-	for _, k := range []string{"j", "k", "x", "n", "e", "d", "tab", "s"} {
+	for _, k := range []string{"j", "k", "n", "e", "tab", "s"} {
 		m, next = m.Update(key(k))
 		if next != nil {
-			t.Fatalf("read-only key %q returned a command", k)
+			t.Fatalf("inactive key %q returned a command", k)
 		}
 	}
 	if r.calls != 1 {
@@ -214,7 +222,7 @@ func TestDashboardNavigationAndRemaps(t *testing.T) {
 			assertSelected(t, m, "alpha")
 			_, cmd := m.Update(key(quit))
 			assertQuit(t, cmd)
-			excluded := []string{"toggle", "edit", "delete", "sync", "new", "progress"}
+			excluded := []string{"edit", "sync", "new", "progress"}
 			if custom {
 				excluded = append(excluded, "k/up", "j/down", "q/ctrl+c")
 			}
@@ -530,10 +538,8 @@ func TestDashboardFilterConfiguredQuitKeys(t *testing.T) {
 			m, _ = m.Update(key("q"))
 			m, _ = m.Update(key("space"))
 			m, _ = m.Update(key("milk"))
-			m, cmd := m.Update(tc.msg)
-			assertQuit(t, cmd)
 			if r.calls != 1 || !strings.Contains(ansi.Strip(m.View()), "Filter: q milk") {
-				t.Fatalf("quit read data or changed the draft: calls=%d view=%s", r.calls, m.View())
+				t.Fatalf("editing read data or changed the draft: calls=%d view=%s", r.calls, m.View())
 			}
 			assertHelp(t, m, []string{strings.TrimSpace(tc.binding) + " quit"},
 				[]string{"q/space", "space quit", "ctrl+c quit"})
@@ -542,6 +548,11 @@ func TestDashboardFilterConfiguredQuitKeys(t *testing.T) {
 			}
 			if tc.binding == "esc" {
 				assertHelp(t, m, nil, []string{"esc cancel"})
+			}
+			_, cmd := m.Update(tc.msg)
+			assertQuit(t, cmd)
+			if r.calls != 1 {
+				t.Fatal("quit performed I/O")
 			}
 		})
 	}

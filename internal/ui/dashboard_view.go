@@ -17,14 +17,9 @@ func (m Dashboard) View() string {
 		return ""
 	}
 	lines := make([]string, 0, min(m.height, len(m.rows)+chromeHeight))
-	if m.height > chromeHeight || m.input.Focused() || (m.query != "" && m.height > 1) {
-		header := "psst"
-		if m.input.Focused() {
-			header = m.input.View()
-		} else if m.query != "" {
-			header = "Filter: " + singleLine(m.query) + " · psst"
-		}
-		lines = append(lines, m.renderLine(header, m.styles.header))
+	status := m.phaseStatus()
+	if m.height > chromeHeight || m.input.Focused() || status != "" || (m.query != "" && m.height > 1) {
+		lines = append(lines, m.headerView(status))
 	}
 	end := min(len(m.rows), m.offset+m.contentHeight())
 	for i := m.offset; i < end; i++ {
@@ -45,7 +40,27 @@ func (m Dashboard) View() string {
 	return strings.Join(lines, "\n")
 }
 
+func (m Dashboard) headerView(status string) string {
+	if status != "" {
+		style := m.styles.header
+		if m.actionError != "" {
+			style = m.styles.error
+		}
+		return m.renderLine(status, style)
+	}
+	if m.input.Focused() {
+		return m.renderLine(m.input.View(), m.styles.header)
+	}
+	if m.query != "" {
+		return m.renderLine("Filter: "+singleLine(m.query)+" · psst", m.styles.header)
+	}
+	return m.renderLine("psst", m.styles.header)
+}
+
 func (m Dashboard) footerHelp() string {
+	if m.phase != phaseIdle {
+		return m.phaseHelp()
+	}
 	if !m.input.Focused() {
 		return m.help
 	}
@@ -75,6 +90,9 @@ func (m Dashboard) contentHeight() int {
 	if m.height > chromeHeight {
 		return m.height - chromeHeight
 	}
+	if m.phaseStatus() != "" {
+		return max(0, m.height-1)
+	}
 	if m.query != "" && m.height > 1 {
 		return m.height - 1
 	}
@@ -87,12 +105,18 @@ func (m Dashboard) renderLine(text string, style lipgloss.Style) string {
 
 func dashboardHelp(keys config.KeysConfig) string {
 	var actions []string
+	var claimed []string
 	for _, binding := range []struct {
 		keys   []string
 		action string
-	}{{keys.Up, "up"}, {keys.Down, "down"}, {keys.Filter, "filter"}, {keys.Quit, "quit"}} {
-		if len(binding.keys) > 0 {
-			actions = append(actions, singleLine(strings.Join(binding.keys, "/"))+" "+binding.action)
+	}{
+		{keys.Quit, "quit"}, {keys.Filter, "filter"}, {keys.Up, "up"}, {keys.Down, "down"},
+		{keys.ToggleDone, "toggle"}, {keys.Delete, "delete"},
+	} {
+		effective := effectiveKeys(binding.keys, claimed)
+		if len(effective) > 0 {
+			actions = append(actions, singleLine(strings.Join(effective, "/"))+" "+binding.action)
+			claimed = append(claimed, effective...)
 		}
 	}
 	return strings.Join(actions, " · ")

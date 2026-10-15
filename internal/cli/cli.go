@@ -64,8 +64,12 @@ func newRootCommand() *cobra.Command {
 				tea.WithOutput(cmd.OutOrStdout()),
 				tea.WithAltScreen(),
 			)
-			_, err = program.Run()
-			return errors.Join(err, application.Close())
+			finalModel, runErr := program.Run()
+			var dashboardErr error
+			if dashboard, ok := finalModel.(ui.Dashboard); ok {
+				dashboardErr = dashboard.Err()
+			}
+			return errors.Join(runErr, dashboardErr, application.Close())
 		},
 	}
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
