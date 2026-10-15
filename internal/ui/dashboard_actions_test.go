@@ -633,3 +633,128 @@ func TestDashboardActionQuitAfterFailedWriteAndDuringReload(t *testing.T) {
 		})
 	}
 }
+
+func TestDashboardActionDeferredQuitStaysTerminal(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, action string
+		fail         bool
+	}{
+		{"toggle", "x", false}, {"delete", "d", false},
+		{"failed toggle", "x", true}, {"failed delete", "d", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			testDeferredQuitStaysTerminal(t, tc.action, tc.fail)
+		})
+	}
+}
+
+func testDeferredQuitStaysTerminal(t *testing.T, action string, fail bool) {
+	t.Helper()
+	m, s := actionFixture(t, config.Default())
+	m, write := m.Update(key(action))
+	if action == "d" {
+		m, write = m.Update(key("y"))
+	}
+	requireCommand(t, write)
+	if fail {
+		s.putErr = errors.New("disk\n\x1b[31mfailed\x1b[0m\u202e 界🙂")
+	}
+	m, quit := m.Update(key("q"))
+	if quit != nil {
+		t.Fatal("quit raced the accepted write")
+	}
+	completion := write()
+	m, quit = m.Update(completion)
+	requireCommand(t, quit)
+	if fail {
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "disk failed 界🙂") || strings.Contains(view, "\u202e") ||
+			strings.Contains(view, "Saving") {
+			t.Fatalf("quitting model lost the sanitized write error: %s", view)
+		}
+	}
+	// Deliver x before the quit command runs, exactly as the event loop can.
+	assertTerminalBeforeQuit(t, m, quit, []tea.Msg{completion})
+	if s.puts != 1 || s.lists != 1 {
+		t.Fatal("quitting replayed the mutation or reloaded")
+	}
+}
+
+func TestDashboardActionQuitPathsStayTerminal(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{"idle", "confirmation", "filter", "loading", "reload"} {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			testQuitPathStaysTerminal(t, path)
+		})
+	}
+}
+
+func testQuitPathStaysTerminal(t *testing.T, path string) {
+	t.Helper()
+	m, s := actionFixture(t, config.Default())
+	var read tea.Cmd
+	switch path {
+	case "idle":
+	case "confirmation":
+		m, _ = m.Update(key("d"))
+	case "filter":
+		m, _ = m.Update(key("/"))
+	case "loading":
+		m, read = submitFilter(t, m, "milk")
+	case "reload":
+		var write tea.Cmd
+		m, write = m.Update(key("x"))
+		m, read = m.Update(requireCommand(t, write)())
+	}
+	if read == nil {
+		read = m.Init()
+	}
+	// Capture both outcomes with the current generation: a late successful
+	// reload must not restore idle, and a late failure must not replace the view.
+	lateResult := read()
+	s.listErr = errors.New("late load failure")
+	lateError := read()
+	s.listErr = nil
+	writes, reads := s.puts, s.lists
+	m, quit := m.Update(key("ctrl+c"))
+	requireCommand(t, quit)
+	before := m.View()
+	for _, msg := range []tea.Msg{lateResult, lateError} {
+		var cmd tea.Cmd
+		m, cmd = m.Update(msg)
+		if cmd != nil || m.View() != before {
+			t.Fatal("late load changed the terminal quitting model")
+		}
+	}
+	assertTerminalBeforeQuit(t, m, quit, nil)
+	if s.puts != writes || s.lists != reads {
+		t.Fatal("quitting performed additional I/O")
+	}
+}
+
+func assertTerminalBeforeQuit(t *testing.T, m tea.Model, quit tea.Cmd, late []tea.Msg) {
+	t.Helper()
+	before := m.View()
+	// Check immediately, then again after each late completion/load message.
+	for i := 0; i <= len(late); i++ {
+		if i > 0 {
+			var cmd tea.Cmd
+			m, cmd = m.Update(late[i-1])
+			if cmd != nil || m.View() != before {
+				t.Fatal("late message changed the terminal quitting model")
+			}
+		}
+		for _, name := range []string{"x", "space", "d", "y", "n", "esc", "/", "enter", "j", "k", "q", "ctrl+c", "x", "d", "y"} {
+			var cmd tea.Cmd
+			m, cmd = m.Update(key(name))
+			if cmd != nil || m.View() != before {
+				t.Fatalf("quitting accepted %q before QuitMsg", name)
+			}
+		}
+	}
+	assertHelp(t, m, nil, []string{"toggle", "delete", "filter", "cancel", "confirm", "quit", "submit"})
+	assertQuit(t, quit)
+}

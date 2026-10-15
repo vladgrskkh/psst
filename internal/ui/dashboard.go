@@ -123,6 +123,10 @@ func (m Dashboard) loadTodos() tea.Cmd {
 
 // Update handles dashboard messages.
 func (m Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Quit commands run asynchronously; no later message may accept more work.
+	if m.action == actionQuitting {
+		return m, nil
+	}
 	switch msg := msg.(type) {
 	case todosLoaded:
 		if msg.request != m.request {
@@ -162,6 +166,7 @@ func (m Dashboard) updateFilter(msg tea.KeyMsg, name string) (tea.Model, tea.Cmd
 	switch {
 	case !msg.Paste && (msg.Alt || (msg.Type != tea.KeyRunes && msg.Type != tea.KeySpace)) &&
 		slices.Contains(m.filterQuitKeys(), name):
+		m.action = actionQuitting
 		return m, tea.Quit
 	case slices.Contains(m.keys.Cancel, name):
 		m.input.Blur()

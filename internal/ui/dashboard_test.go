@@ -538,10 +538,8 @@ func TestDashboardFilterConfiguredQuitKeys(t *testing.T) {
 			m, _ = m.Update(key("q"))
 			m, _ = m.Update(key("space"))
 			m, _ = m.Update(key("milk"))
-			m, cmd := m.Update(tc.msg)
-			assertQuit(t, cmd)
 			if r.calls != 1 || !strings.Contains(ansi.Strip(m.View()), "Filter: q milk") {
-				t.Fatalf("quit read data or changed the draft: calls=%d view=%s", r.calls, m.View())
+				t.Fatalf("editing read data or changed the draft: calls=%d view=%s", r.calls, m.View())
 			}
 			assertHelp(t, m, []string{strings.TrimSpace(tc.binding) + " quit"},
 				[]string{"q/space", "space quit", "ctrl+c quit"})
@@ -550,6 +548,11 @@ func TestDashboardFilterConfiguredQuitKeys(t *testing.T) {
 			}
 			if tc.binding == "esc" {
 				assertHelp(t, m, nil, []string{"esc cancel"})
+			}
+			_, cmd := m.Update(tc.msg)
+			assertQuit(t, cmd)
+			if r.calls != 1 {
+				t.Fatal("quit performed I/O")
 			}
 		})
 	}

@@ -14,6 +14,7 @@ const (
 	actionConfirmDelete
 	actionSaving
 	actionReloading
+	actionQuitting
 )
 
 type dashboardTarget struct {
@@ -46,6 +47,7 @@ func (m Dashboard) updateDashboardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch {
 	case slices.Contains(m.keys.Quit, name):
+		m.action = actionQuitting
 		return m, tea.Quit
 	case slices.Contains(m.keys.Filter, name):
 		m.actionError = ""
@@ -95,15 +97,18 @@ func (m Dashboard) finishMutation(operation uint64, err error, action string) (t
 	if m.action != actionSaving || operation != m.request {
 		return m, nil
 	}
+	if err != nil {
+		m.actionError = "Could not " + action + ": " + singleLine(err.Error())
+	}
 	// Bubble Tea does not join running commands on exit. Let accepted writes
-	// finish before the application's database is closed.
+	// finish before the application's database is closed. An explicit quit is
+	// honored on failure too, preserving the error in the final rendered model.
 	if m.quitRequested {
-		m.action = actionIdle
+		m.action = actionQuitting
 		return m, tea.Quit
 	}
 	if err != nil {
 		m.action = actionIdle
-		m.actionError = "Could not " + action + ": " + singleLine(err.Error())
 		return m, nil
 	}
 	m.action = actionReloading
@@ -118,6 +123,7 @@ func (m Dashboard) updateAction(name string) (tea.Model, tea.Cmd) {
 			m.quitRequested = true
 			return m, nil
 		}
+		m.action = actionQuitting
 		return m, tea.Quit
 	case m.action != actionConfirmDelete:
 		return m, nil
@@ -142,11 +148,19 @@ func (m Dashboard) actionStatus() string {
 		return "Reloading todos…"
 	case actionIdle:
 		return m.actionError
+	case actionQuitting:
+		if m.actionError != "" {
+			return m.actionError
+		}
+		return "Quitting… · psst"
 	}
 	return ""
 }
 
 func (m Dashboard) actionHelp() string {
+	if m.action == actionQuitting {
+		return ""
+	}
 	quit := m.keys.Quit
 	if m.action != actionConfirmDelete {
 		if len(quit) == 0 {
