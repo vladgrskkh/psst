@@ -15,7 +15,7 @@ var ErrInvalidDate = errors.New("invalid date hint")
 var (
 	reISO      = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 	reISOTime  = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}$`)
-	reRelative = regexp.MustCompile(`^in\s+(\d+)\s*([hmdw])$`)
+	reRelative = regexp.MustCompile(`^in\s+(\d+)\s*([hmdw])(?:\s+(?:at\s+)?(.+))?$`)
 	reTime     = regexp.MustCompile(`^(\d{1,2}):(\d{2})$`)
 	reTimeAMPM = regexp.MustCompile(`^(\d{1,2})\s*(am|pm)$`)
 )
@@ -31,7 +31,9 @@ const (
 // relative durations first, then accepts a bare time or a day/weekday with an
 // optional time. Bare times in the past roll to tomorrow; a past time attached
 // to today or the current weekday rolls to the next week. Missing times use
-// defaultTime (HH:MM). now and defaultTime are injected for determinism.
+// defaultTime (HH:MM). Relative days/weeks keep the current time unless an
+// explicit clock is supplied; relative hours/minutes are elapsed offsets.
+// now and defaultTime are injected for determinism.
 func Parse(s string, now time.Time, defaultTime string) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -68,7 +70,7 @@ func parseExact(s string, now time.Time, defaultTime string) (time.Time, bool, e
 }
 
 func parseRelative(s string, now time.Time) (time.Time, bool, error) {
-	m := reRelative.FindStringSubmatch(s)
+	m := reRelative.FindStringSubmatch(strings.ToLower(s))
 	if m == nil {
 		return time.Time{}, false, nil
 	}
@@ -76,17 +78,30 @@ func parseRelative(s string, now time.Time) (time.Time, bool, error) {
 	if err != nil {
 		return time.Time{}, true, invalid(s)
 	}
+	if m[3] != "" && (m[2] == "h" || m[2] == "m") {
+		return time.Time{}, true, invalid(s)
+	}
+	var days int
 	switch m[2] {
 	case "h":
 		return now.Add(time.Duration(n) * time.Hour), true, nil
 	case "m":
 		return now.Add(time.Duration(n) * time.Minute), true, nil
 	case "d":
-		return now.AddDate(0, 0, n), true, nil
+		days = n
 	case "w":
-		return now.AddDate(0, 0, daysPerWeek*n), true, nil
+		days = daysPerWeek * n
+	default:
+		return time.Time{}, true, invalid(s)
 	}
-	return time.Time{}, true, invalid(s)
+	if m[3] == "" {
+		return now.AddDate(0, 0, days), true, nil
+	}
+	hm, err := parseHM(strings.ReplaceAll(m[3], " ", ""))
+	if err != nil {
+		return time.Time{}, true, invalid(s)
+	}
+	return time.Date(now.Year(), now.Month(), now.Day()+days, hm[0], hm[1], 0, 0, now.Location()), true, nil
 }
 
 func parseDayAndTime(s string, now time.Time, defaultTime string) (time.Time, error) {

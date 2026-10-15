@@ -33,6 +33,12 @@ func TestParse(t *testing.T) {
 		{"relative hours", "in 2h", time.Date(2026, 8, 17, 12, 0, 0, 0, time.Local)},
 		{"relative minutes", "in 30m", time.Date(2026, 8, 17, 10, 30, 0, 0, time.Local)},
 		{"relative days", "in 2d", time.Date(2026, 8, 19, 10, 0, 0, 0, time.Local)},
+		{"relative weeks", "in 2w", time.Date(2026, 8, 31, 10, 0, 0, 0, time.Local)},
+		{"relative weeks with time", "in 2w at 18:30", time.Date(2026, 8, 31, 18, 30, 0, 0, time.Local)},
+		{"relative days with time", "in 2d 18:30", time.Date(2026, 8, 19, 18, 30, 0, 0, time.Local)},
+		{"relative days with pm", "in 2d at 9pm", time.Date(2026, 8, 19, 21, 0, 0, 0, time.Local)},
+		{"relative days with midnight", "in 1d at 00:00", time.Date(2026, 8, 18, 0, 0, 0, 0, time.Local)},
+		{"relative keywords uppercase", "IN 2W AT 18:30", time.Date(2026, 8, 31, 18, 30, 0, 0, time.Local)},
 		{"time only future", "15:00", time.Date(2026, 8, 17, 15, 0, 0, 0, time.Local)},
 		{"time only past rolls to tomorrow", "09:00", time.Date(2026, 8, 18, 9, 0, 0, 0, time.Local)},
 		{"am suffix", "9am", time.Date(2026, 8, 18, 9, 0, 0, 0, time.Local)},
@@ -58,10 +64,47 @@ func TestParse(t *testing.T) {
 func TestParseErrors(t *testing.T) {
 	t.Parallel()
 
-	for _, in := range []string{"", "   ", "banana", "in 2x", "99:99", "@tomorrow"} {
+	for _, in := range []string{
+		"", "   ", "banana", "in 2x", "99:99", "@tomorrow",
+		"in 2w at 99:99", "in 2w at", "in 2h at 18:30", "in -2w at 18:30",
+	} {
 		_, err := dateparser.Parse(in, testNow(), "09:00")
 		if !errors.Is(err, dateparser.ErrInvalidDate) {
 			t.Fatalf("Parse(%q) error = %v; want ErrInvalidDate", in, err)
 		}
+	}
+}
+
+func TestRelativeClockKeepsCalendarDateAcrossDST(t *testing.T) {
+	t.Parallel()
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 3, 7, 23, 30, 0, 0, location)
+	got, err := dateparser.Parse("in 1w at 18:30", now, "09:00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 3, 14, 18, 30, 0, 0, location)
+	if !got.Equal(want) {
+		t.Fatalf("relative calendar deadline = %v; want %v", got, want)
+	}
+}
+
+func TestRelativeClockSkipsMidnightDSTGap(t *testing.T) {
+	t.Parallel()
+	location, err := time.LoadLocation("America/Santiago")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 5, 0, 30, 0, 0, location)
+	got, err := dateparser.Parse("in 1d at 18:30", now, "09:00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 9, 6, 18, 30, 0, 0, location)
+	if !got.Equal(want) {
+		t.Fatalf("deadline across midnight DST = %v; want %v", got, want)
 	}
 }

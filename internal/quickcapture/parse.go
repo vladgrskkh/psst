@@ -5,6 +5,7 @@ package quickcapture
 import (
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ type Result struct {
 }
 
 func isTimeToken(s string) bool {
+	s = strings.ToLower(s)
 	return reTime.MatchString(s) || reTimeAMP.MatchString(s)
 }
 
@@ -77,9 +79,30 @@ func listFromTokens(tok string, rest []string) (string, bool) {
 
 func parseDeadline(tokens []string, i int, now time.Time, defaultTime string) (option.Option[time.Time], int, error) {
 	hintParts := []string{strings.TrimPrefix(tokens[i], "@")}
-	for i+1 < len(tokens) && (isTimeToken(tokens[i+1]) || tokens[i+1] == "at") {
+	if strings.EqualFold(hintParts[0], "in") && i+1 < len(tokens) {
 		i++
 		hintParts = append(hintParts, tokens[i])
+		if _, err := strconv.Atoi(tokens[i]); err == nil && i+1 < len(tokens) {
+			switch strings.ToLower(tokens[i+1]) {
+			case "h", "m", "d", "w":
+				i++
+				hintParts = append(hintParts, tokens[i])
+			}
+		}
+	}
+	for i+1 < len(tokens) {
+		next := tokens[i+1]
+		if isTimeToken(next) || strings.EqualFold(next, "at") {
+			i++
+			hintParts = append(hintParts, next)
+			continue
+		}
+		if i+2 < len(tokens) && isTimeToken(next+" "+tokens[i+2]) {
+			hintParts = append(hintParts, next, tokens[i+2])
+			i += 2
+			continue
+		}
+		break
 	}
 	hint := strings.Join(hintParts, " ")
 	if hint == "" {
