@@ -260,13 +260,16 @@ func testFailureKeepsSelectionAndAllowsRetry(t *testing.T, action string) {
 	if !strings.Contains(view, "disk failed 界🙂") || strings.Contains(view, "\u202e") {
 		t.Fatalf("missing sanitized error: %s", view)
 	}
+	assertDashboardError(t, m, s.putErr)
 	s.putErr = nil
 	m, cmd = m.Update(key(action))
 	if action == "d" {
 		m, cmd = m.Update(key("y"))
 	}
+	assertDashboardError(t, m, nil)
 	m, next = m.Update(requireCommand(t, cmd)())
 	m, _ = m.Update(requireCommand(t, next)())
+	assertDashboardError(t, m, nil)
 	if action == "x" && (!s.todos["b"].Done || s.todos["a"].Done) {
 		t.Fatal("failure changed selection before retry")
 	}
@@ -668,6 +671,7 @@ func testDeferredQuitStaysTerminal(t *testing.T, action string, fail bool) {
 	completion := write()
 	m, quit = m.Update(completion)
 	requireCommand(t, quit)
+	assertDashboardError(t, m, s.putErr)
 	if fail {
 		view := ansi.Strip(m.View())
 		if !strings.Contains(view, "disk failed 界🙂") || strings.Contains(view, "\u202e") ||
@@ -721,6 +725,7 @@ func testQuitPathStaysTerminal(t *testing.T, path string) {
 	writes, reads := s.puts, s.lists
 	m, quit := m.Update(key("ctrl+c"))
 	requireCommand(t, quit)
+	assertDashboardError(t, m, nil)
 	before := m.View()
 	for _, msg := range []tea.Msg{lateResult, lateError} {
 		var cmd tea.Cmd
@@ -757,4 +762,65 @@ func assertTerminalBeforeQuit(t *testing.T, m tea.Model, quit tea.Cmd, late []te
 	}
 	assertHelp(t, m, nil, []string{"toggle", "delete", "filter", "cancel", "confirm", "quit", "submit"})
 	assertQuit(t, quit)
+}
+
+func assertDashboardError(t *testing.T, m tea.Model, cause error) {
+	t.Helper()
+	result, ok := m.(interface{ Err() error })
+	if !ok {
+		t.Fatal("dashboard does not expose its final mutation error")
+	}
+	err := result.Err()
+	if !errors.Is(err, cause) {
+		t.Fatalf("dashboard error = %v; want cause %v", err, cause)
+	}
+	if cause != nil && (!strings.Contains(err.Error(), "disk failed 界🙂") ||
+		strings.ContainsAny(err.Error(), "\n\x1b\u202e")) {
+		t.Fatalf("final error is not sanitized: %q", err.Error())
+	}
+}
+
+func TestDashboardActionToggleKeepsSelectionInTwoRows(t *testing.T) {
+	t.Parallel()
+	m, s := actionFixture(t, config.Default())
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 2})
+	assertSelected(t, m, "milk")
+	m, write := m.Update(key("x"))
+	if !strings.Contains(m.View(), "Saving") {
+		t.Fatalf("missing saving status: %s", m.View())
+	}
+	// Check both transitions directly, without a resize to repair the viewport.
+	if !strings.Contains(ansi.Strip(m.View()), "> [ ] milk") {
+		t.Errorf("starting toggle hid the selected row: %s", m.View())
+	}
+	s.putErr = errors.New("disk full")
+	m, _ = m.Update(requireCommand(t, write)())
+	if !strings.Contains(m.View(), "Could not toggle todo: disk full") {
+		t.Fatalf("missing failure status: %s", m.View())
+	}
+	assertSelected(t, m, "milk")
+	assertBounds(t, m.View(), 80, 2)
+}
+
+func TestDashboardActionDismissedStatusKeepsUnresolvedErrorOnQuit(t *testing.T) {
+	t.Parallel()
+	for _, dismiss := range []string{"filter", "confirmation"} {
+		t.Run(dismiss, func(t *testing.T) {
+			t.Parallel()
+			m, s := actionFixture(t, config.Default())
+			s.putErr = errors.New("disk\n\x1b[31mfailed\x1b[0m\u202e 界🙂")
+			m, write := m.Update(key("x"))
+			m, _ = m.Update(requireCommand(t, write)())
+			if dismiss == "filter" {
+				m, _ = m.Update(key("/"))
+				m, _ = m.Update(key("esc"))
+			} else {
+				m, _ = m.Update(key("d"))
+				m, _ = m.Update(key("n"))
+			}
+			m, quit := m.Update(key("q"))
+			assertQuit(t, quit)
+			assertDashboardError(t, m, s.putErr)
+		})
+	}
 }

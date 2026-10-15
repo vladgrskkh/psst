@@ -31,6 +31,15 @@ type todoDeleted struct {
 	err       error
 }
 
+type dashboardMutationError struct {
+	message string
+	cause   error
+}
+
+func (e dashboardMutationError) Error() string { return e.message }
+
+func (e dashboardMutationError) Unwrap() error { return e.cause }
+
 func (m Dashboard) updateDashboardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	name := msg.String()
 	if name == " " {
@@ -76,6 +85,8 @@ func (m Dashboard) updateDashboardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Dashboard) toggleTodo(id string) (tea.Model, tea.Cmd) {
 	m.action, m.actionError = actionSaving, ""
+	m.finalErr = nil
+	m.offset = m.visibleOffset()
 	m.request++ // Invalidate every read captured before the mutation.
 	return m, func() tea.Msg {
 		_, err := m.reader.ToggleDone(id)
@@ -85,6 +96,8 @@ func (m Dashboard) toggleTodo(id string) (tea.Model, tea.Cmd) {
 
 func (m Dashboard) deleteTodo() (tea.Model, tea.Cmd) {
 	m.action, m.actionError = actionSaving, ""
+	m.finalErr = nil
+	m.offset = m.visibleOffset()
 	m.request++
 	id := m.deleteTarget.id
 	m.deleteTarget = dashboardTarget{}
@@ -99,16 +112,18 @@ func (m Dashboard) finishMutation(operation uint64, err error, action string) (t
 	}
 	if err != nil {
 		m.actionError = "Could not " + action + ": " + singleLine(err.Error())
+		m.finalErr = dashboardMutationError{message: m.actionError, cause: err}
 	}
 	// Bubble Tea does not join running commands on exit. Let accepted writes
 	// finish before the application's database is closed. An explicit quit is
-	// honored on failure too, preserving the error in the final rendered model.
+	// honored on failure too; the CLI reports Err after terminal restoration.
 	if m.quitRequested {
 		m.action = actionQuitting
 		return m, tea.Quit
 	}
 	if err != nil {
 		m.action = actionIdle
+		m.offset = m.visibleOffset()
 		return m, nil
 	}
 	m.action = actionReloading
@@ -132,6 +147,7 @@ func (m Dashboard) updateAction(name string) (tea.Model, tea.Cmd) {
 	case slices.Contains(m.keys.Confirm, name):
 		return m.deleteTodo()
 	}
+	m.offset = m.visibleOffset()
 	return m, nil
 }
 

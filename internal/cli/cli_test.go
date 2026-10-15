@@ -6,12 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/vladgrskkh/psst/internal/quickcapture"
@@ -101,6 +103,90 @@ func TestNoArgsClosesDatabaseAfterCancellation(t *testing.T) {
 		t.Fatalf("dashboard cancellation = %v; want context.Canceled", err)
 	}
 	requireClosedDatabase(t, dbPath)
+}
+
+//nolint:paralleltest,reassign // real Execute uses stdin; this serial test restores it via cleanup.
+func TestExecuteReportsDashboardMutationFailureAfterTerminalExit(t *testing.T) {
+	dbPath := configureCLI(t)
+	seedMismatchedTodo(t, dbPath)
+	input, send, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = input.Close(); _ = send.Close() })
+	previousStdin := os.Stdin
+	os.Stdin = input
+	t.Cleanup(func() { os.Stdin = previousStdin })
+	output := &dashboardActionOutput{input: send}
+	var stderr bytes.Buffer
+	// A deadline only bounds a broken interaction; rendered output drives input.
+	deadline := time.AfterFunc(5*time.Second, func() { _, _ = send.WriteString("\x03") })
+	defer deadline.Stop()
+	code := Execute([]string{}, output, io.MultiWriter(&stderr, output))
+	if !output.toggled || !output.quit {
+		t.Fatalf("dashboard interaction did not reach the visible error: %q", output.String())
+	}
+	if code != runtimeErrorExitCode {
+		t.Errorf("failed dashboard mutation exit code = %d; want %d", code, runtimeErrorExitCode)
+	}
+	want := "psst: Could not toggle todo: todo not found"
+	if !strings.Contains(stderr.String(), want) {
+		t.Errorf("mutation failure missing from stderr: %q", stderr.String())
+	}
+	text := output.String()
+	exit := strings.LastIndex(text, "\x1b[?1049l")
+	if exit < 0 || !strings.Contains(text[exit:], want) {
+		t.Errorf("mutation failure missing after alternate-screen exit: %q", text)
+	}
+	requireClosedDatabase(t, dbPath)
+}
+
+type dashboardActionOutput struct {
+	bytes.Buffer
+
+	input         *os.File
+	toggled, quit bool
+}
+
+func (o *dashboardActionOutput) Write(data []byte) (int, error) {
+	n, err := o.Buffer.Write(data)
+	if err != nil {
+		return n, err
+	}
+	view := ansi.Strip(o.String())
+	var key string
+	switch {
+	case !o.toggled && strings.Contains(view, "> [ ] broken todo"):
+		o.toggled, key = true, "x"
+	case !o.quit && strings.Contains(view, "Could not toggle todo: todo not found"):
+		o.quit, key = true, "q"
+	}
+	if key != "" {
+		_, err = o.input.WriteString(key)
+	}
+	return n, err
+}
+
+func seedMismatchedTodo(t *testing.T, path string) {
+	t.Helper()
+	db, err := bolt.Open(path, 0o600, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	err = db.Update(func(tx *bolt.Tx) error {
+		bucket, createErr := tx.CreateBucketIfNotExists([]byte("todos"))
+		if createErr != nil {
+			return createErr
+		}
+		return bucket.Put([]byte("stored-key"), []byte(`{"id":"missing-key","title":"broken todo"}`))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestExecuteUnknownCommandReturnsUsageExitCode(t *testing.T) {

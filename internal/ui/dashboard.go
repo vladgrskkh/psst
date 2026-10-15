@@ -44,6 +44,7 @@ type Dashboard struct {
 	action        dashboardAction
 	deleteTarget  dashboardTarget
 	actionError   string
+	finalErr      error
 	quitRequested bool
 }
 
@@ -112,6 +113,11 @@ func NewDashboard(reader DashboardTodos, theme config.ThemeConfig, keys config.K
 // Init returns the initial snapshot-loading command.
 func (m Dashboard) Init() tea.Cmd {
 	return m.loadTodos()
+}
+
+// Err returns the unresolved mutation failure for reporting after terminal restoration.
+func (m Dashboard) Err() error {
+	return m.finalErr
 }
 
 func (m Dashboard) loadTodos() tea.Cmd {
