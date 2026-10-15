@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-16-psst-core-tui-design.md` (approved).
 
-**Status:** Slice 1 is merged at `7291aa4`, relative-date capture at `5512a32`, and Slice 2 filtering at `6b0e880`. Slice 3 toggle/delete is implemented on `tui-dashboard-actions`, audited, independently task-reviewed, and terminal-tested. Later slices remain separate PRs.
+**Status:** Slice 1 is merged at `7291aa4`, relative-date capture at `5512a32`, and Slice 2 filtering at `6b0e880`. Slice 3 toggle/delete is implemented on `tui-dashboard-actions`, audited, independently reviewed, and terminal-tested. Final review's durable quit-error reporting and tiny-terminal viewport findings are fixed and re-reviewed. Later slices remain separate PRs.
 
 ## Global Constraints
 
@@ -72,7 +72,7 @@ Publication: commit and open a focused PR describing the final read-only dashboa
 
 ## Task 3: Local dashboard actions
 
-**Files:** modify `internal/ui/dashboard.go`, `internal/ui/dashboard_view.go`, `internal/ui/dashboard_test.go`; create `internal/ui/dashboard_actions.go` and `internal/ui/dashboard_actions_test.go`. Keep behavior-specific helpers in the actions file; do not refactor unrelated UI or services. This plan is maintained by the coordinating agent.
+**Files:** modify `internal/ui/dashboard.go`, `internal/ui/dashboard_view.go`, `internal/ui/dashboard_test.go`; create `internal/ui/dashboard_actions.go` and `internal/ui/dashboard_actions_test.go`. The final review adds focused `internal/cli/cli.go` and `internal/cli/cli_test.go` changes to report failed writes after terminal restoration. Keep behavior-specific helpers in the actions file; do not refactor unrelated UI or services. This plan is maintained by the coordinating agent.
 
 **Interfaces:** replace the dashboard's listing-only consumer with `DashboardTodos`, containing exactly `List(string) ([]*domain.Todo, error)`, `ToggleDone(string) (*domain.Todo, error)`, and `Delete(string) error`. Change the existing `NewDashboard` parameter to this interface; `App.TodoService` already satisfies it, so CLI composition needs no adapter. Retain the existing constructor's other arguments and `tea.Model` contract.
 
@@ -83,6 +83,8 @@ Publication: commit and open a focused PR describing the final read-only dashboa
 - [x] A quit request during a pending write is remembered and fulfilled once the service call completes, without a redundant reload when already leaving. Bubble Tea does not join command goroutines on exit, so quitting before the write completes could race application persistence cleanup. Read-only reloads retain existing immediate-quit behavior. Test this ordering with a deferred command and observable completion.
 - [x] Preserve the existing request-generation protection and invalidate pre-mutation reads; older result/error messages cannot restore stale rows after a mutation/reload. Accept mutation completion only for the active operation; replaying a completion must not schedule another reload. Use explicit result messages and clear state names, not generic runner wrappers.
 - [x] Mutation failures keep the existing rows/selection and display the sanitized error. Do not report success or reload on failure; release the pending state so retry/navigation/filter/quit work. A follow-up load error must be visible and keep the model usable without replaying the mutation.
+- [x] A failed write when quitting must survive alternate-screen restoration: expose a final dashboard error for the CLI to join with program/cleanup errors, print through existing CLI error reporting, and exit nonzero. No generic runner wrappers or test-only production hooks. Test the dashboard's failed pending-quit error and real CLI error/status propagation.
+- [x] Recalculate the viewport when action status changes content height, even without a resize; a visible selection in an 80x2 terminal stays visible during saving and after failure. Add a direct transition regression.
 - [x] Honor remapped/disabled ToggleDone/Delete/Confirm/Cancel keys. Default old bindings must not stay active when replaced. While editing a filter, printable action keys remain text. Keep non-text quit behavior and current filter precedence. Clone newly used key slices like existing ones.
 - [x] Test duplicate titles (right ID), repeated keys while pending, confirm/cancel/quit collisions, cancellation/no side effects, failures and retry, active-filter reload, stale load errors/results and duplicate completions, no selection, and pasted text not triggering destructive actions. Include long/unsafe titles/error text, Unicode, and zero/tiny/narrow resize during confirmation/pending/error; rendered output must remain within dimensions and prompts/errors must be visible when space permits. Footer help must match the active mode and bindings.
 - [x] Keep all persistence rules/timestamps/tombstones inside `TodoService`. No infra imports, new dependencies, sync lifecycle, completed expansion, forms, or view switching in this PR. Completion disappears into the existing collapsed DONE section; reopening completed todos comes with its expansion slice.
