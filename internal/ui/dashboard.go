@@ -1,4 +1,4 @@
-// Package ui presents the read-only todo dashboard.
+// Package ui presents the local todo dashboard.
 package ui
 
 import (
@@ -19,29 +19,37 @@ import (
 	"github.com/vladgrskkh/psst/internal/domain"
 )
 
-// TodoLister supplies the dashboard's local snapshot.
-type TodoLister interface {
+// DashboardTodos supplies local snapshots and mutations for the dashboard.
+type DashboardTodos interface {
 	List(string) ([]*domain.Todo, error)
+	ToggleDone(string) (*domain.Todo, error)
+	Delete(string) error
 }
 
-// Dashboard is the read-only dashboard model.
+// Dashboard is the local dashboard model.
 type Dashboard struct {
-	reader  TodoLister
-	now     time.Time
-	keys    config.KeysConfig
-	styles  dashboardStyles
-	rows    []dashboardRow
-	cursor  int
-	offset  int
-	width   int
-	height  int
-	help    string
-	input   textinput.Model
-	query   string
-	request uint64
+	reader        DashboardTodos
+	now           time.Time
+	keys          config.KeysConfig
+	styles        dashboardStyles
+	rows          []dashboardRow
+	cursor        int
+	offset        int
+	width         int
+	height        int
+	help          string
+	input         textinput.Model
+	query         string
+	request       uint64
+	action        dashboardAction
+	deleteTarget  dashboardTarget
+	actionError   string
+	quitRequested bool
 }
 
 type dashboardRow struct {
+	id         string
+	title      string
 	text       string
 	style      lipgloss.Style
 	selectable bool
@@ -68,7 +76,7 @@ const (
 )
 
 // NewDashboard constructs the dashboard with a fixed launch reference time.
-func NewDashboard(reader TodoLister, theme config.ThemeConfig, keys config.KeysConfig, now time.Time) Dashboard {
+func NewDashboard(reader DashboardTodos, theme config.ThemeConfig, keys config.KeysConfig, now time.Time) Dashboard {
 	styles := newDashboardStyles(theme)
 	input := textinput.New()
 	input.Prompt = "Filter: "
@@ -81,8 +89,14 @@ func NewDashboard(reader TodoLister, theme config.ThemeConfig, keys config.KeysC
 		reader: reader,
 		now:    now,
 		keys: config.KeysConfig{
-			Up: slices.Clone(keys.Up), Down: slices.Clone(keys.Down), Quit: slices.Clone(keys.Quit),
-			Filter: slices.Clone(keys.Filter), Cancel: slices.Clone(keys.Cancel),
+			Up:         slices.Clone(keys.Up),
+			Down:       slices.Clone(keys.Down),
+			Quit:       slices.Clone(keys.Quit),
+			Filter:     slices.Clone(keys.Filter),
+			Cancel:     slices.Clone(keys.Cancel),
+			ToggleDone: slices.Clone(keys.ToggleDone),
+			Delete:     slices.Clone(keys.Delete),
+			Confirm:    slices.Clone(keys.Confirm),
 		},
 		styles:  styles,
 		rows:    []dashboardRow{{text: "Loading todos…", style: styles.muted}},
@@ -114,6 +128,9 @@ func (m Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.request != m.request {
 			return m, nil
 		}
+		if m.action == actionReloading {
+			m.action = actionIdle
+		}
 		m.cursor, m.offset = -1, 0
 		if msg.err != nil {
 			m.rows = []dashboardRow{{
@@ -122,30 +139,16 @@ func (m Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.rows, m.cursor = m.dashboardRows(msg.todos)
 		}
+	case todoToggled:
+		return m.finishMutation(msg.operation, msg.err, "toggle todo")
+	case todoDeleted:
+		return m.finishMutation(msg.operation, msg.err, "delete todo")
 	case tea.WindowSizeMsg:
 		m.width, m.height = max(0, msg.Width), max(0, msg.Height)
 		m.input.Width = max(1, m.width-ansi.StringWidth(m.input.Prompt)-1)
 		m.input.SetCursor(m.input.Position())
 	case tea.KeyMsg:
-		name := msg.String()
-		if name == " " {
-			name = "space"
-		}
-		if m.input.Focused() {
-			return m.updateFilter(msg, name)
-		}
-		switch {
-		case slices.Contains(m.keys.Quit, name):
-			return m, tea.Quit
-		case slices.Contains(m.keys.Filter, name):
-			m.input.SetValue(m.query)
-			m.input.CursorEnd()
-			return m, m.input.Focus()
-		case slices.Contains(m.keys.Up, name):
-			m.cursor = m.nextCursor(-1)
-		case slices.Contains(m.keys.Down, name):
-			m.cursor = m.nextCursor(1)
-		}
+		return m.updateDashboardKey(msg)
 	default:
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
@@ -224,6 +227,7 @@ func (m Dashboard) dashboardRows(todos []*domain.Todo) ([]dashboardRow, int) {
 				cursor = len(rows)
 			}
 			rows = append(rows, dashboardRow{
+				id: todo.ID, title: singleLine(todo.Title),
 				text: "[ ] " + singleLine(todo.Title), style: m.styles.text, selectable: true,
 			})
 		}
