@@ -17,7 +17,7 @@ func (m Dashboard) View() string {
 		return ""
 	}
 	lines := make([]string, 0, min(m.height, len(m.rows)+chromeHeight))
-	status := m.actionStatus()
+	status := m.phaseStatus()
 	if m.height > chromeHeight || m.input.Focused() || status != "" || (m.query != "" && m.height > 1) {
 		lines = append(lines, m.headerView(status))
 	}
@@ -58,8 +58,8 @@ func (m Dashboard) headerView(status string) string {
 }
 
 func (m Dashboard) footerHelp() string {
-	if m.action != actionIdle {
-		return m.actionHelp()
+	if m.phase != phaseIdle {
+		return m.phaseHelp()
 	}
 	if !m.input.Focused() {
 		return m.help
@@ -90,7 +90,7 @@ func (m Dashboard) contentHeight() int {
 	if m.height > chromeHeight {
 		return m.height - chromeHeight
 	}
-	if m.actionStatus() != "" {
+	if m.phaseStatus() != "" {
 		return max(0, m.height-1)
 	}
 	if m.query != "" && m.height > 1 {

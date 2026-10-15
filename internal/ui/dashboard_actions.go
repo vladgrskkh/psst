@@ -7,14 +7,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type dashboardAction uint8
+type dashboardPhase uint8
 
 const (
-	actionIdle dashboardAction = iota
-	actionConfirmDelete
-	actionSaving
-	actionReloading
-	actionQuitting
+	phaseIdle dashboardPhase = iota
+	phaseConfirmDelete
+	phaseSaving
+	phaseReloading
+	phaseQuitting
 )
 
 type dashboardTarget struct {
@@ -51,12 +51,12 @@ func (m Dashboard) updateDashboardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Paste {
 		return m, nil
 	}
-	if m.action != actionIdle {
-		return m.updateAction(name)
+	if m.phase != phaseIdle {
+		return m.updatePhaseKey(name)
 	}
 	switch {
 	case slices.Contains(m.keys.Quit, name):
-		m.action = actionQuitting
+		m.phase = phaseQuitting
 		return m, tea.Quit
 	case slices.Contains(m.keys.Filter, name):
 		m.actionError = ""
@@ -73,7 +73,7 @@ func (m Dashboard) updateDashboardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case slices.Contains(m.keys.Delete, name):
 		if m.cursor >= 0 && m.rows[m.cursor].selectable {
-			m.action = actionConfirmDelete
+			m.phase = phaseConfirmDelete
 			m.actionError = ""
 			row := m.rows[m.cursor]
 			m.deleteTarget = dashboardTarget{id: row.id, title: row.title}
@@ -84,7 +84,7 @@ func (m Dashboard) updateDashboardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Dashboard) toggleTodo(id string) (tea.Model, tea.Cmd) {
-	m.action, m.actionError = actionSaving, ""
+	m.phase, m.actionError = phaseSaving, ""
 	m.finalErr = nil
 	m.offset = m.visibleOffset()
 	m.request++ // Invalidate every read captured before the mutation.
@@ -95,7 +95,7 @@ func (m Dashboard) toggleTodo(id string) (tea.Model, tea.Cmd) {
 }
 
 func (m Dashboard) deleteTodo() (tea.Model, tea.Cmd) {
-	m.action, m.actionError = actionSaving, ""
+	m.phase, m.actionError = phaseSaving, ""
 	m.finalErr = nil
 	m.offset = m.visibleOffset()
 	m.request++
@@ -107,43 +107,43 @@ func (m Dashboard) deleteTodo() (tea.Model, tea.Cmd) {
 }
 
 func (m Dashboard) finishMutation(operation uint64, err error, action string) (tea.Model, tea.Cmd) {
-	if m.action != actionSaving || operation != m.request {
+	if m.phase != phaseSaving || operation != m.request {
 		return m, nil
 	}
+	var cmd tea.Cmd
 	if err != nil {
 		m.actionError = "Could not " + action + ": " + singleLine(err.Error())
 		m.finalErr = dashboardMutationError{message: m.actionError, cause: err}
+		m.phase = phaseIdle
+		m.offset = m.visibleOffset()
+	} else {
+		m.phase = phaseReloading
+		m.request++ // A completion can be consumed only once.
+		cmd = m.loadTodos()
 	}
 	// Bubble Tea does not join running commands on exit. Let accepted writes
 	// finish before the application's database is closed. An explicit quit is
 	// honored on failure too; the CLI reports Err after terminal restoration.
 	if m.quitRequested {
-		m.action = actionQuitting
+		m.phase = phaseQuitting
 		return m, tea.Quit
 	}
-	if err != nil {
-		m.action = actionIdle
-		m.offset = m.visibleOffset()
-		return m, nil
-	}
-	m.action = actionReloading
-	m.request++ // A completion can be consumed only once.
-	return m, m.loadTodos()
+	return m, cmd
 }
 
-func (m Dashboard) updateAction(name string) (tea.Model, tea.Cmd) {
+func (m Dashboard) updatePhaseKey(name string) (tea.Model, tea.Cmd) {
 	switch {
 	case slices.Contains(m.keys.Quit, name):
-		if m.action == actionSaving {
+		if m.phase == phaseSaving {
 			m.quitRequested = true
 			return m, nil
 		}
-		m.action = actionQuitting
+		m.phase = phaseQuitting
 		return m, tea.Quit
-	case m.action != actionConfirmDelete:
+	case m.phase != phaseConfirmDelete:
 		return m, nil
 	case name == "n" || slices.Contains(m.keys.Cancel, name):
-		m.action, m.deleteTarget = actionIdle, dashboardTarget{}
+		m.phase, m.deleteTarget = phaseIdle, dashboardTarget{}
 	case slices.Contains(m.keys.Confirm, name):
 		return m.deleteTodo()
 	}
@@ -151,20 +151,20 @@ func (m Dashboard) updateAction(name string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Dashboard) actionStatus() string {
-	switch m.action {
-	case actionConfirmDelete:
+func (m Dashboard) phaseStatus() string {
+	switch m.phase {
+	case phaseConfirmDelete:
 		return "Delete \"" + m.deleteTarget.title + "\"?"
-	case actionSaving:
+	case phaseSaving:
 		if m.quitRequested {
 			return "Saving… quit requested"
 		}
 		return "Saving…"
-	case actionReloading:
+	case phaseReloading:
 		return "Reloading todos…"
-	case actionIdle:
+	case phaseIdle:
 		return m.actionError
-	case actionQuitting:
+	case phaseQuitting:
 		if m.actionError != "" {
 			return m.actionError
 		}
@@ -173,12 +173,12 @@ func (m Dashboard) actionStatus() string {
 	return ""
 }
 
-func (m Dashboard) actionHelp() string {
-	if m.action == actionQuitting {
+func (m Dashboard) phaseHelp() string {
+	if m.phase == phaseQuitting {
 		return ""
 	}
 	quit := m.keys.Quit
-	if m.action != actionConfirmDelete {
+	if m.phase != phaseConfirmDelete {
 		if len(quit) == 0 {
 			return ""
 		}

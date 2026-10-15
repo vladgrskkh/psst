@@ -41,7 +41,7 @@ type Dashboard struct {
 	input         textinput.Model
 	query         string
 	request       uint64
-	action        dashboardAction
+	phase         dashboardPhase
 	deleteTarget  dashboardTarget
 	actionError   string
 	finalErr      error
@@ -130,7 +130,7 @@ func (m Dashboard) loadTodos() tea.Cmd {
 // Update handles dashboard messages.
 func (m Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Quit commands run asynchronously; no later message may accept more work.
-	if m.action == actionQuitting {
+	if m.phase == phaseQuitting {
 		return m, nil
 	}
 	switch msg := msg.(type) {
@@ -138,8 +138,8 @@ func (m Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.request != m.request {
 			return m, nil
 		}
-		if m.action == actionReloading {
-			m.action = actionIdle
+		if m.phase == phaseReloading {
+			m.phase = phaseIdle
 		}
 		m.cursor, m.offset = -1, 0
 		if msg.err != nil {
@@ -172,7 +172,7 @@ func (m Dashboard) updateFilter(msg tea.KeyMsg, name string) (tea.Model, tea.Cmd
 	switch {
 	case !msg.Paste && (msg.Alt || (msg.Type != tea.KeyRunes && msg.Type != tea.KeySpace)) &&
 		slices.Contains(m.filterQuitKeys(), name):
-		m.action = actionQuitting
+		m.phase = phaseQuitting
 		return m, tea.Quit
 	case slices.Contains(m.keys.Cancel, name):
 		m.input.Blur()
