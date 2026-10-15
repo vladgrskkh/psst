@@ -5,10 +5,15 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/charmbracelet/bubbles/cursor"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/vladgrskkh/psst/internal/config"
 	"github.com/vladgrskkh/psst/internal/domain"
@@ -21,16 +26,19 @@ type TodoLister interface {
 
 // Dashboard is the read-only dashboard model.
 type Dashboard struct {
-	reader TodoLister
-	now    time.Time
-	keys   config.KeysConfig
-	styles dashboardStyles
-	rows   []dashboardRow
-	cursor int
-	offset int
-	width  int
-	height int
-	help   string
+	reader  TodoLister
+	now     time.Time
+	keys    config.KeysConfig
+	styles  dashboardStyles
+	rows    []dashboardRow
+	cursor  int
+	offset  int
+	width   int
+	height  int
+	help    string
+	input   textinput.Model
+	query   string
+	request uint64
 }
 
 type dashboardRow struct {
@@ -40,8 +48,9 @@ type dashboardRow struct {
 }
 
 type todosLoaded struct {
-	todos []*domain.Todo
-	err   error
+	request uint64
+	todos   []*domain.Todo
+	err     error
 }
 
 const (
@@ -61,26 +70,40 @@ const (
 // NewDashboard constructs the dashboard with a fixed launch reference time.
 func NewDashboard(reader TodoLister, theme config.ThemeConfig, keys config.KeysConfig, now time.Time) Dashboard {
 	styles := newDashboardStyles(theme)
+	input := textinput.New()
+	input.Prompt = "Filter: "
+	input.PromptStyle, input.TextStyle = styles.header, styles.text
+	input.PlaceholderStyle, input.CompletionStyle = styles.muted, styles.muted
+	input.Cursor.Style, input.Cursor.TextStyle = styles.selected, styles.text
+	input.Cursor.SetMode(cursor.CursorStatic)
+	input.Width = defaultWidth - ansi.StringWidth(input.Prompt) - 1
 	return Dashboard{
 		reader: reader,
 		now:    now,
 		keys: config.KeysConfig{
 			Up: slices.Clone(keys.Up), Down: slices.Clone(keys.Down), Quit: slices.Clone(keys.Quit),
+			Filter: slices.Clone(keys.Filter), Cancel: slices.Clone(keys.Cancel),
 		},
-		styles: styles,
-		rows:   []dashboardRow{{text: "Loading todos…", style: styles.muted}},
-		cursor: -1,
-		width:  defaultWidth,
-		height: defaultHeight,
-		help:   dashboardHelp(keys),
+		styles:  styles,
+		rows:    []dashboardRow{{text: "Loading todos…", style: styles.muted}},
+		cursor:  -1,
+		width:   defaultWidth,
+		height:  defaultHeight,
+		help:    dashboardHelp(keys),
+		input:   input,
+		request: 1,
 	}
 }
 
 // Init returns the initial snapshot-loading command.
 func (m Dashboard) Init() tea.Cmd {
+	return m.loadTodos()
+}
+
+func (m Dashboard) loadTodos() tea.Cmd {
 	return func() tea.Msg {
-		todos, err := m.reader.List("")
-		return todosLoaded{todos: todos, err: err}
+		todos, err := m.reader.List(m.query)
+		return todosLoaded{request: m.request, todos: todos, err: err}
 	}
 }
 
@@ -88,6 +111,9 @@ func (m Dashboard) Init() tea.Cmd {
 func (m Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case todosLoaded:
+		if msg.request != m.request {
+			return m, nil
+		}
 		m.cursor, m.offset = -1, 0
 		if msg.err != nil {
 			m.rows = []dashboardRow{{
@@ -98,22 +124,68 @@ func (m Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = max(0, msg.Width), max(0, msg.Height)
+		m.input.Width = max(1, m.width-ansi.StringWidth(m.input.Prompt)-1)
+		m.input.SetCursor(m.input.Position())
 	case tea.KeyMsg:
 		name := msg.String()
 		if name == " " {
 			name = "space"
 		}
+		if m.input.Focused() {
+			return m.updateFilter(msg, name)
+		}
 		switch {
 		case slices.Contains(m.keys.Quit, name):
 			return m, tea.Quit
+		case slices.Contains(m.keys.Filter, name):
+			m.input.SetValue(m.query)
+			m.input.CursorEnd()
+			return m, m.input.Focus()
 		case slices.Contains(m.keys.Up, name):
 			m.cursor = m.nextCursor(-1)
 		case slices.Contains(m.keys.Down, name):
 			m.cursor = m.nextCursor(1)
 		}
+	default:
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
 	}
 	m.offset = m.visibleOffset()
 	return m, nil
+}
+
+func (m Dashboard) updateFilter(msg tea.KeyMsg, name string) (tea.Model, tea.Cmd) {
+	switch {
+	case !msg.Paste && (msg.Alt || (msg.Type != tea.KeyRunes && msg.Type != tea.KeySpace)) &&
+		slices.Contains(m.filterQuitKeys(), name):
+		return m, tea.Quit
+	case slices.Contains(m.keys.Cancel, name):
+		m.input.Blur()
+		return m, nil
+	case name == "enter":
+		m.query = strings.TrimSpace(m.input.Value())
+		m.input.Blur()
+		m.request++
+		m.rows = []dashboardRow{{text: "Loading todos…", style: m.styles.muted}}
+		m.cursor, m.offset = -1, 0
+		return m, m.loadTodos()
+	default:
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	}
+}
+
+// filterQuitKeys excludes printable bindings reserved for draft text.
+func (m Dashboard) filterQuitKeys() []string {
+	var keys []string
+	for _, name := range m.keys.Quit {
+		if name != "space" && utf8.RuneCountInString(name) > 1 {
+			keys = append(keys, name)
+		}
+	}
+	return keys
 }
 
 func (m Dashboard) dashboardRows(todos []*domain.Todo) ([]dashboardRow, int) {
@@ -137,6 +209,8 @@ func (m Dashboard) dashboardRows(todos []*domain.Todo) ([]dashboardRow, int) {
 		message := "No todos."
 		if done > 0 {
 			message = "No open todos."
+		} else if m.query != "" {
+			message = "No matches."
 		}
 		rows = append(rows, dashboardRow{text: message, style: m.styles.muted})
 	}

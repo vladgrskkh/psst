@@ -1,4 +1,4 @@
-# psst TUI Dashboard Implementation Plan (Part 2, Slice 1)
+# psst TUI Dashboard Implementation Plan (Part 2)
 
 > **For agentic workers:** Execute the tasks against the approved spec with bounded implementation ownership and independent review. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -6,11 +6,11 @@
 
 **Architecture:** `internal/ui` owns the Bubble Tea model and presentation, depending on a narrow todo-listing interface. `internal/app` exposes its existing todo service; the Cobra root command owns terminal startup and closes the application after the program exits. UI service calls run in `tea.Cmd`, never directly in `Update`.
 
-**Tech Stack:** Go 1.25.4, Bubble Tea v1.3.10, Lip Gloss v1.1.0, existing bbolt and configuration packages; stdlib tests.
+**Tech Stack:** Go 1.25.4, Bubble Tea v1.3.10, Bubbles v0.21.0, Lip Gloss v1.1.0, existing bbolt and configuration packages; stdlib tests.
 
 **Spec:** `docs/superpowers/specs/2026-08-16-psst-core-tui-design.md` (approved).
 
-**Status:** Slice 1 implemented and independently reviewed on `tui-dashboard`. Core and CI are already merged. After this slice is reviewed/merged, resume with dashboard toggle/delete/filter interactions below.
+**Status:** Slice 1 is merged in main at `7291aa4`. Core and CI are already merged. Slice 2 dashboard filtering on `tui-filter` is implemented, audited and independently reviewed. Toggle/delete remain the next pending dashboard interactions. Relative-date capture is a separate PR.
 
 ## Global Constraints
 
@@ -58,10 +58,20 @@ Publication: commit and open a focused PR describing the final read-only dashboa
 
 ## Following slices from the same approved spec
 
-1. Dashboard toggle/delete/filter interactions through todo-service commands, with confirmation and reload messages.
+### Slice 2: Dashboard filtering
+
+**Files:** modify `internal/ui/dashboard.go`, `internal/ui/dashboard_view.go`, `internal/ui/dashboard_test.go`, `go.mod`, `go.sum`, and this plan. Reuse the existing theme styles.
+
+- [x] Add behavior tests and observe meaningful RED for filter submission, draft text, cancellation without I/O, blank clearing, Unicode editing/paste, remapped keys, loading/error/no-match feedback, terminal bounds and latest-response protection.
+- [x] Implement configured filter/cancel bindings with a Bubbles v0.21.0 text input compatible with Bubble Tea v1. Keep `NewDashboard` and the one-method `TodoLister` unchanged. Preserve applied rows/selection while editing; Enter returns a deferred `List(query)` command. Track request generations so initial/older results and errors cannot replace a newer search.
+- [x] Verify focused UI tests, full `make audit`, build and independent review. Exercise search, draft cancellation and configured quit in a real terminal. Confirm active help follows Quit/Cancel/submit precedence while editing.
+
+### Remaining slices
+
+1. Dashboard toggle/delete interactions through todo-service commands, with confirmation and reload messages.
 2. Shared new/edit form: title, natural-language deadline validation, description, cached-list picker, return to previous view.
 3. Minimal-list view and root screen routing; configurable view switching.
 4. Sync lifecycle/status, launch/full/manual sync, periodic pull, mutation-triggered debounce, shutdown coordination and refresh messages.
 5. Weekly progress, completed-section expansion and remaining visual polish against the approved theme.
 
-These are separate reviewable PRs; this plan completes Slice 1 only.
+These are separate reviewable PRs. Slice 2 contains filtering only; toggle/delete, forms and the other interactions remain pending.
