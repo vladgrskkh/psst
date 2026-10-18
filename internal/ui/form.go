@@ -163,6 +163,12 @@ func (m Form) fill(todo domain.Todo) Form {
 //nolint:gocognit,funlen,nestif // Key precedence is intentionally visible in one form transition.
 func (m Form) updateKey(msg tea.KeyMsg) (Form, tea.Cmd) {
 	name := msg.String()
+	if m.id != "" && m.loading {
+		if !msg.Paste && (name == "esc" || slices.Contains(m.keys.Cancel, name)) {
+			return m, func() tea.Msg { return formCancelled{generation: m.generation} }
+		}
+		return m, nil
+	}
 	if msg.Paste {
 		var cmd tea.Cmd
 		m.fields[m.focus], cmd = m.fields[m.focus].Update(msg)

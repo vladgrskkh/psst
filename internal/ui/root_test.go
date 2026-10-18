@@ -144,6 +144,79 @@ func TestFormControlQuitBindingsAndPastedText(t *testing.T) {
 	}
 }
 
+func TestEditFormShowsLoadingAndRejectsDraftKeysUntilTodoArrives(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 18, 12, 0, 0, 0, time.UTC)
+	store := &memoryTodos{items: []*domain.Todo{{ID: "stored", Title: "Stored title", ListName: "home"}}}
+	todos := service.NewTodoService(store, fixedClock{now})
+	cfg := config.Default()
+	var root tea.Model = initializedRoot(t, todos, cfg, now)
+	root, route := root.Update(key("e"))
+	if route == nil {
+		t.Fatal("edit binding did not request the selected todo")
+	}
+	root, load := root.Update(route())
+	if load == nil {
+		t.Fatal("edit form did not defer selected-todo load")
+	}
+	root = typeText(root, "Draft text")
+	loadingView := ansi.Strip(root.View())
+	if !strings.Contains(loadingView, "Loading todo") || strings.Contains(loadingView, "Draft text") {
+		t.Fatalf("edit accepted input or hid its load state: %s", loadingView)
+	}
+	root, _ = root.Update(load())
+	if !strings.Contains(ansi.Strip(root.View()), "Title: Stored title") {
+		t.Fatalf("loaded todo did not initialize the edit fields: %s", ansi.Strip(root.View()))
+	}
+
+	var cancelRoot tea.Model = initializedRoot(t, todos, cfg, now)
+	cancelRoot, route = cancelRoot.Update(key("e"))
+	cancelRoot, load = cancelRoot.Update(route())
+	cancelRoot, cancel := cancelRoot.Update(key("esc"))
+	cancelRoot = settle(t, cancelRoot, cancel)
+	assertSelected(t, cancelRoot, "Stored title")
+	cancelRoot, _ = cancelRoot.Update(load())
+	assertSelected(t, cancelRoot, "Stored title")
+}
+
+func TestNewFormRemainsEditableWhileSuggestionsLoad(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 18, 12, 0, 0, 0, time.UTC)
+	store := &memoryTodos{}
+	todos := service.NewTodoService(store, fixedClock{now})
+	cfg := config.Default()
+	var root tea.Model = ui.NewRoot(todos, todos, cfg.Theme, cfg.Keys, now, "psst", "09:00")
+	root, route := root.Update(key("n"))
+	root, load := root.Update(route())
+	if load == nil {
+		t.Fatal("new form did not defer suggestion load")
+	}
+	root = typeText(root, "New draft")
+	root, _ = root.Update(load())
+	if !strings.Contains(ansi.Strip(root.View()), "Title: New draft") {
+		t.Fatalf("suggestion load discarded new-form input: %s", ansi.Strip(root.View()))
+	}
+}
+
+func TestFormFooterShowsOnlyEffectiveQuitBindings(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 18, 12, 0, 0, 0, time.UTC)
+	cfg := config.Default()
+	cfg.Keys.Quit = []string{"q", "space", "ctrl+x", "alt+q"}
+	store := &memoryTodos{}
+	todos := service.NewTodoService(store, fixedClock{now})
+	root := openForm(t, ui.NewRoot(todos, todos, cfg.Theme, cfg.Keys, now, "psst", "09:00"))
+	view := ansi.Strip(root.View())
+	if !strings.Contains(view, "ctrl+x/alt+q quit") {
+		t.Fatalf("form help omitted active control/Alt quit keys: %s", view)
+	}
+	for _, printable := range []string{"q/space", "space quit", " · q quit"} {
+		if strings.Contains(view, printable) {
+			t.Fatalf("form help advertises printable field input as quit: %s", view)
+		}
+	}
+}
+
 func initializedRoot(
 	t *testing.T,
 	todos *service.TodoService,

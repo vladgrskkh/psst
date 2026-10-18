@@ -217,8 +217,12 @@ func (m Dashboard) updateFilter(msg tea.KeyMsg, name string) (tea.Model, tea.Cmd
 
 // filterQuitKeys excludes printable bindings reserved for draft text.
 func (m Dashboard) filterQuitKeys() []string {
+	return effectiveQuitKeys(m.keys.Quit)
+}
+
+func effectiveQuitKeys(configured []string) []string {
 	var keys []string
-	for _, name := range m.keys.Quit {
+	for _, name := range configured {
 		if name != keySpace && utf8.RuneCountInString(name) > 1 {
 			keys = append(keys, name)
 		}
