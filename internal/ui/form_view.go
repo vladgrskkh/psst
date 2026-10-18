@@ -25,12 +25,8 @@ func (m Form) View() string {
 		}
 		lines = append(lines, m.line(m.message, style))
 	}
-	if len(lines) < m.height {
-		query := m.fields[3].Value()
-		if m.focus != listField {
-			query = ""
-		}
-		matches := matchingSuggestions(query, m.suggestions)
+	if len(lines) < m.height && m.focus == listField {
+		matches := matchingSuggestions(m.fields[listField].Value(), m.suggestions)
 		for _, name := range matches {
 			if len(lines) >= m.height {
 				break

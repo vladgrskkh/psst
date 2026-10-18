@@ -95,14 +95,25 @@ func TestNewFormListTypingReplacesDefaultAndBlankUsesDefault(t *testing.T) {
 	}
 }
 
-func TestNewFormHighlightsDefaultListBeforeInput(t *testing.T) {
+func TestFormSuggestionsAppearOnlyWhenListFocused(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.October, 18, 12, 0, 0, 0, time.UTC)
 	cfg := config.Default()
-	todos := service.NewTodoService(&memoryTodos{}, fixedClock{now})
+	store := &memoryTodos{items: []*domain.Todo{{ID: "old", Title: "Old", ListName: "groceries"}}}
+	todos := service.NewTodoService(store, fixedClock{now})
 	root := openForm(t, ui.NewRoot(todos, todos, cfg.Theme, cfg.Keys, now, "psst", "09:00"))
-	if view := ansi.Strip(root.View()); !strings.Contains(view, "> psst") {
-		t.Fatalf("default list suggestion was not highlighted before input: %s", view)
+	if view := ansi.Strip(root.View()); strings.Contains(view, "groceries") {
+		t.Fatalf("list suggestions appeared while List was not focused: %s", view)
+	}
+	for range 3 {
+		root, _ = root.Update(key("tab"))
+	}
+	if view := ansi.Strip(root.View()); !strings.Contains(view, "groceries") || !strings.Contains(view, "> psst") {
+		t.Fatalf("focused List did not show suggestions with default highlighted: %s", view)
+	}
+	root, _ = root.Update(key("tab"))
+	if view := ansi.Strip(root.View()); strings.Contains(view, "groceries") {
+		t.Fatalf("list suggestions remained visible after List lost focus: %s", view)
 	}
 }
 
@@ -117,11 +128,14 @@ func TestFormListPlaceholderAndSuggestionsUseNormalContrast(t *testing.T) {
 	store := &memoryTodos{items: []*domain.Todo{{ID: "old", Title: "Old", ListName: "groceries"}}}
 	todos := service.NewTodoService(store, fixedClock{now})
 	root := openForm(t, ui.NewRoot(todos, todos, cfg.Theme, cfg.Keys, now, "psst", "09:00"))
+	for range 3 {
+		root, _ = root.Update(key("tab"))
+	}
 	view := root.View()
 
 	normal := lipgloss.NewStyle().Background(lipgloss.Color(cfg.Theme.Bg)).Foreground(lipgloss.Color(cfg.Theme.Text))
 	muted := lipgloss.NewStyle().Background(lipgloss.Color(cfg.Theme.Bg)).Foreground(lipgloss.Color(cfg.Theme.Muted))
-	for _, text := range []string{"List: psst", "groceries"} {
+	for _, text := range []string{"> List: psst", "groceries"} {
 		if !strings.Contains(view, normal.Render(text)) {
 			t.Errorf("list text %q did not use normal contrast: %q", text, view)
 		}
