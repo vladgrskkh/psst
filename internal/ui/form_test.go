@@ -7,7 +7,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"github.com/vladgrskkh/psst/internal/config"
 	"github.com/vladgrskkh/psst/internal/domain"
@@ -90,6 +92,42 @@ func TestNewFormListTypingReplacesDefaultAndBlankUsesDefault(t *testing.T) {
 				t.Fatalf("saved ListName = %q; want %q", created[0].ListName, tc.wantList)
 			}
 		})
+	}
+}
+
+func TestNewFormHighlightsDefaultListBeforeInput(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 18, 12, 0, 0, 0, time.UTC)
+	cfg := config.Default()
+	todos := service.NewTodoService(&memoryTodos{}, fixedClock{now})
+	root := openForm(t, ui.NewRoot(todos, todos, cfg.Theme, cfg.Keys, now, "psst", "09:00"))
+	if view := ansi.Strip(root.View()); !strings.Contains(view, "> psst") {
+		t.Fatalf("default list suggestion was not highlighted before input: %s", view)
+	}
+}
+
+//nolint:paralleltest // Isolate the test while it changes Lip Gloss's global color profile.
+func TestFormListPlaceholderAndSuggestionsUseNormalContrast(t *testing.T) {
+	profile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(profile) })
+
+	now := time.Date(2026, time.October, 18, 12, 0, 0, 0, time.UTC)
+	cfg := config.Default()
+	store := &memoryTodos{items: []*domain.Todo{{ID: "old", Title: "Old", ListName: "groceries"}}}
+	todos := service.NewTodoService(store, fixedClock{now})
+	root := openForm(t, ui.NewRoot(todos, todos, cfg.Theme, cfg.Keys, now, "psst", "09:00"))
+	view := root.View()
+
+	normal := lipgloss.NewStyle().Background(lipgloss.Color(cfg.Theme.Bg)).Foreground(lipgloss.Color(cfg.Theme.Text))
+	muted := lipgloss.NewStyle().Background(lipgloss.Color(cfg.Theme.Bg)).Foreground(lipgloss.Color(cfg.Theme.Muted))
+	for _, text := range []string{"List: psst", "groceries"} {
+		if !strings.Contains(view, normal.Render(text)) {
+			t.Errorf("list text %q did not use normal contrast: %q", text, view)
+		}
+		if strings.Contains(view, muted.Render(text)) {
+			t.Errorf("list text %q still used muted contrast: %q", text, view)
+		}
 	}
 }
 

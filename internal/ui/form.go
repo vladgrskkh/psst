@@ -26,22 +26,23 @@ const (
 )
 
 type Form struct {
-	reader        FormTodos
-	keys          config.KeysConfig
-	now           time.Time
-	defaultTime   string
-	defaultList   string
-	generation    uint64
-	id            string
-	fields        [4]textinput.Model
-	focus         int
-	width, height int
-	suggestions   []string
-	suggestion    int
-	loading, busy bool
-	message       string
-	writeErr      error
-	styles        dashboardStyles
+	reader             FormTodos
+	keys               config.KeysConfig
+	now                time.Time
+	defaultTime        string
+	defaultList        string
+	generation         uint64
+	id                 string
+	fields             [4]textinput.Model
+	focus              int
+	width, height      int
+	suggestions        []string
+	selectedList       string
+	suggestionExplicit bool
+	loading, busy      bool
+	message            string
+	writeErr           error
+	styles             dashboardStyles
 }
 
 func newForm(
@@ -80,7 +81,6 @@ func newForm(
 		width:       defaultWidth,
 		height:      defaultHeight,
 		loading:     true,
-		suggestion:  -1,
 		styles:      styles,
 	}
 }
@@ -126,6 +126,11 @@ func (m Form) Update(msg tea.Msg) (Form, tea.Cmd) {
 			m.suggestions = append(m.suggestions, name)
 		}
 		slices.Sort(m.suggestions)
+		m.selectedList = strings.TrimSpace(m.fields[listField].Value())
+		if m.selectedList == "" {
+			m.selectedList = m.defaultList
+		}
+		m.suggestionExplicit = false
 	case formSaved:
 		if msg.generation != m.generation {
 			return m, nil
@@ -172,6 +177,10 @@ func (m Form) updateKey(msg tea.KeyMsg) (Form, tea.Cmd) {
 	if msg.Paste {
 		var cmd tea.Cmd
 		m.fields[m.focus], cmd = m.fields[m.focus].Update(msg)
+		if m.focus == listField {
+			m.selectedList = ""
+			m.suggestionExplicit = false
+		}
 		m.message = m.dateFeedback()
 		return m, cmd
 	}
@@ -181,15 +190,22 @@ func (m Form) updateKey(msg tea.KeyMsg) (Form, tea.Cmd) {
 	if m.focus == listField && (name == keyDown || name == keyUp) {
 		matches := matchingSuggestions(m.fields[3].Value(), m.suggestions)
 		if len(matches) > 0 {
+			selected := slices.Index(matches, m.selectedList)
 			if name == keyDown {
-				m.suggestion = (m.suggestion + 1) % len(matches)
-			} else {
-				if m.suggestion < 0 {
-					m.suggestion = len(matches) - 1
+				if selected < 0 {
+					selected = 0
 				} else {
-					m.suggestion = (m.suggestion + len(matches) - 1) % len(matches)
+					selected = (selected + 1) % len(matches)
+				}
+			} else {
+				if selected < 0 {
+					selected = len(matches) - 1
+				} else {
+					selected = (selected + len(matches) - 1) % len(matches)
 				}
 			}
+			m.selectedList = matches[selected]
+			m.suggestionExplicit = true
 			return m, nil
 		}
 	}
@@ -204,11 +220,11 @@ func (m Form) updateKey(msg tea.KeyMsg) (Form, tea.Cmd) {
 		m.fields[m.focus].Focus()
 	case "enter":
 		if m.focus == listField {
-			matches := matchingSuggestions(m.fields[3].Value(), m.suggestions)
-			if m.suggestion >= 0 && m.suggestion < len(matches) {
-				chosen := matches[m.suggestion]
-				m.fields[3].SetValue(chosen)
-				m.suggestion = -1
+			if m.suggestionExplicit && m.selectedList != "" {
+				chosen := m.selectedList
+				m.fields[listField].SetValue(chosen)
+				m.selectedList = ""
+				m.suggestionExplicit = false
 				m.message = "List: " + chosen
 				return m, nil
 			}
@@ -217,18 +233,6 @@ func (m Form) updateKey(msg tea.KeyMsg) (Form, tea.Cmd) {
 		m, cmd = m.save()
 		return m, cmd
 	case keyDown, keyUp:
-		if m.focus == listField {
-			matches := matchingSuggestions(m.fields[3].Value(), m.suggestions)
-			if len(matches) > 0 {
-				if name == keyDown {
-					m.suggestion = (m.suggestion + 1) % len(matches)
-				} else {
-					m.suggestion = (m.suggestion + len(matches) - 1) % len(matches)
-				}
-				m.message = "List: " + matches[m.suggestion]
-				return m, nil
-			}
-		}
 		var cmd tea.Cmd
 		m.fields[m.focus], cmd = m.fields[m.focus].Update(msg)
 		return m, cmd
@@ -238,7 +242,8 @@ func (m Form) updateKey(msg tea.KeyMsg) (Form, tea.Cmd) {
 		m.message = ""
 		m.message = m.dateFeedback()
 		if m.focus == listField {
-			m.suggestion = -1
+			m.selectedList = ""
+			m.suggestionExplicit = false
 		}
 		return m, cmd
 	}

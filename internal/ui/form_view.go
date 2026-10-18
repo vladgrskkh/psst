@@ -31,12 +31,12 @@ func (m Form) View() string {
 			query = ""
 		}
 		matches := matchingSuggestions(query, m.suggestions)
-		for i, name := range matches {
+		for _, name := range matches {
 			if len(lines) >= m.height {
 				break
 			}
-			style, prefix := m.styles.muted, "  "
-			if i == m.suggestion {
+			style, prefix := m.styles.text, "  "
+			if name == m.selectedList {
 				style, prefix = m.styles.selected, "> "
 			}
 			lines = append(lines, m.line(prefix+name, style))
@@ -65,6 +65,9 @@ func (m Form) fieldLines() []string {
 		if value == "" && m.fields[i].Placeholder != "" {
 			text = m.fields[i].Prompt + singleLine(m.fields[i].Placeholder)
 			style = m.styles.muted
+			if i == listField {
+				style = m.styles.text
+			}
 		}
 		focused := i == m.focus
 		if focused {
