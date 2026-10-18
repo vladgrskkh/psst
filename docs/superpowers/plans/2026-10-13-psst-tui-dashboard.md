@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-16-psst-core-tui-design.md` (approved).
 
-**Status:** Slice 1 is merged at `7291aa4`, relative-date capture at `5512a32`, and Slice 2 filtering at `6b0e880`. Slice 3 toggle/delete is implemented on `tui-dashboard-actions`, audited, independently reviewed, and terminal-tested. Final review's durable quit-error reporting and tiny-terminal viewport findings are fixed and re-reviewed. Later slices remain separate PRs.
+**Status:** Slice 1 is merged at `7291aa4`, relative-date capture at `5512a32`, Slice 2 filtering at `6b0e880`, and dashboard actions at `23b13a9`. Task 4 implements the shared create/edit form and Dashboard/Form routing on `tui-form`; audit/build and independent review pass, including fixes for typed list names and printable quit keys. Later slices remain separate PRs.
 
 ## Global Constraints
 
@@ -90,11 +90,28 @@ Publication: commit and open a focused PR describing the final read-only dashboa
 - [x] Keep all persistence rules/timestamps/tombstones inside `TodoService`. No infra imports, new dependencies, sync lifecycle, completed expansion, forms, or view switching in this PR. Completion disappears into the existing collapsed DONE section; reopening completed todos comes with its expansion slice.
 - [x] Update old read-only test expectations to reflect implemented interactions without weakening existing navigation/filter coverage. Run focused UI tests while iterating, then `make audit` and `make build/psst` before commit. Self-review and report RED/GREEN commands/output, changed files, and any concerns. Independent review and terminal smoke verification follow before publication.
 
+### Slice 4: Shared new/edit form with form routing
+
+## Task 4: Dashboard create/edit form
+
+**Files:** create `internal/ui/root.go`, `internal/ui/form.go`, `internal/ui/form_view.go`, `internal/ui/form_test.go`, and `internal/ui/root_test.go`; modify `internal/ui/dashboard.go`, `internal/ui/dashboard_test.go`, `internal/cli/cli.go`, and `internal/cli/cli_test.go`. Keep minimal-list routing for its own later slice.
+
+**Interfaces:** Keep the dashboard on its existing `DashboardTodos` interface (`List`, `ToggleDone`, `Delete`). Define `FormTodos` in the form consumer package with exactly `List(string) ([]*domain.Todo, error)`, `Create(service.CreateTodoParams) (*domain.Todo, error)`, and `Update(string, service.UpdateTodoParams) (*domain.Todo, error)`; the UI must not import infra. Add `NewRoot(dashboardTodos DashboardTodos, formTodos FormTodos, theme config.ThemeConfig, keys config.KeysConfig, now time.Time, defaultList, defaultTime string) Root`; `Root` implements `tea.Model` and exposes unresolved final errors for CLI reporting. The CLI passes the same `App.TodoService` to both ports.
+
+- [x] Write behavior-first tests for the form, root routes, and CLI integration before production changes; run and record expected RED. Use a real `TodoService` with a small in-memory `TodoStore` for mutation behavior, and keep bridge/infra out of tests.
+- [x] Implement root routing for only Dashboard and Form. Dashboard's configured `new` and `edit` bindings emit request messages; Edit carries the selected todo ID. Keep the dashboard model intact while the form is open so cancel/success returns to its current applied filter and selection; success returns a deferred dashboard reload.
+- [x] Implement one form model for Create and Update with fields in this order: title, natural-language deadline, description, list name. Tab/Shift+Tab changes focus; Esc or configured Cancel returns without a write; Enter validates/submits. Editing loads the selected todo asynchronously and initializes all fields.
+- [x] Parse nonempty deadlines with `dateparser.Parse` using the form's injected reference time and `default_time`; blank clears/removes the deadline. Show live parse feedback and validation errors inline. Submit through `TodoService.Create`/`Update` so title/list/future-deadline validation and timestamps stay in the service. Do not call `CaptureService` or trigger Reminders sync.
+- [x] Refresh list-name suggestions asynchronously every time a form opens, deriving unique names from `List("")` plus the configured default. Use fuzzy subsequence matching. Choosing a suggestion fills the field; typing a new nonempty list name remains valid.
+- [x] Return write failures to the form, show sanitized errors, and allow correction/retry. Preserve unresolved write errors through cancel/navigation so `Root.Err()` lets existing CLI error handling report failure on quit; clear the error when an accepted retry succeeds/starts. Generation-tag async load/save messages so stale responses cannot replace the active screen.
+- [x] Build form/root styles from `ThemeConfig`; keep View pure, escape/flatten terminal control text, and bound every rendered line to terminal width/height, including tiny windows. Test Unicode, pasted text, disabled/remapped keys, date parsing boundaries, invalid fields, error dismissal/retry, duplicate titles, filtered edits, cancel without side effects, failure, and no external Reminders access.
+- [x] Update root-command tests to use `NewRoot`; preserve version, quick-capture, cancellation, startup errors, database cleanup, and the alternate-screen failed-write test. Run focused tests, then `make audit` and `make build/psst` before commit. Independently review the focused diff and exercise create/edit/cancel against a temporary database in a terminal.
+- [x] Keep list suggestions limited to locally stored todo list names and the configured default in this slice. Do not add a remote-list cache, sync triggers/status, minimal list view, weekly progress, or completed expansion; those remain separate slices.
+
 ### Remaining slices
 
-1. Shared new/edit form: title, natural-language deadline validation, description, cached-list picker, return to previous view.
-2. Minimal-list view and root screen routing; configurable view switching.
-3. Sync lifecycle/status, launch/full/manual sync, periodic pull, mutation-triggered debounce, shutdown coordination and refresh messages.
-4. Weekly progress, completed-section expansion and remaining visual polish against the approved theme.
+1. Add the minimal-list view to the root model and add configurable view switching.
+2. Sync lifecycle/status, launch/full/manual sync, periodic pull, mutation-triggered debounce, shutdown coordination and refresh messages.
+3. Weekly progress, completed-section expansion and remaining visual polish against the approved theme.
 
-These are separate reviewable PRs. Slice 3 contains local dashboard actions only.
+These are separate reviewable PRs. Slice 3 contains local dashboard actions only. Task 4 adds just the root routing needed for its form; MinimalList stays in the following slice.
