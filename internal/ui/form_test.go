@@ -54,6 +54,45 @@ func TestCreateFormCreatesThroughTodoServiceAndRefreshesSuggestions(t *testing.T
 	}
 }
 
+func TestNewFormListTypingReplacesDefaultAndBlankUsesDefault(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 18, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name, typedList, wantList string
+	}{
+		{name: "typed list replaces default", typedList: "groceries", wantList: "groceries"},
+		{name: "untouched list uses default", wantList: "psst"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			store := &memoryTodos{}
+			todos := service.NewTodoService(store, fixedClock{now})
+			cfg := config.Default()
+			root := openForm(t, ui.NewRoot(todos, todos, cfg.Theme, cfg.Keys, now, "psst", "09:00"))
+			root = typeText(root, "Buy oats")
+			for range 3 {
+				root, _ = root.Update(key("tab"))
+			}
+			if tc.typedList == "" && !strings.Contains(ansi.Strip(root.View()), "List: psst") {
+				t.Fatalf("blank list field did not show its default guidance: %s", ansi.Strip(root.View()))
+			}
+			root = typeText(root, tc.typedList)
+			root, cmd := root.Update(key("enter"))
+			if cmd == nil {
+				t.Fatal("valid create did not submit")
+			}
+			settle(t, root, cmd)
+			created, err := todos.List("")
+			if err != nil || len(created) != 1 {
+				t.Fatalf("create result = %d todos, %v", len(created), err)
+			}
+			if created[0].ListName != tc.wantList {
+				t.Fatalf("saved ListName = %q; want %q", created[0].ListName, tc.wantList)
+			}
+		})
+	}
+}
+
 func TestEditFormLoadsAndUpdatesSelectedTodoWithoutLosingFilter(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.October, 18, 12, 0, 0, 0, time.UTC)
@@ -341,7 +380,7 @@ func TestCreateFormRejectsBlankListWithoutWriting(t *testing.T) {
 	store := &memoryTodos{}
 	todos := service.NewTodoService(store, fixedClock{now})
 	cfg := config.Default()
-	root := openForm(t, ui.NewRoot(todos, todos, cfg.Theme, cfg.Keys, now, "personal", "09:00"))
+	root := openForm(t, ui.NewRoot(todos, todos, cfg.Theme, cfg.Keys, now, "", "09:00"))
 	root = typeText(root, "Task")
 	for range 3 {
 		root, _ = root.Update(key("tab"))

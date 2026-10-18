@@ -65,14 +65,15 @@ func newForm(
 		fields[i].Cursor.Style, fields[i].Cursor.TextStyle = styles.selected, styles.text
 		fields[i].Cursor.SetMode(cursor.CursorStatic)
 	}
-	fields[3].SetValue(defaultList)
+	listDefault := strings.TrimSpace(defaultList)
+	fields[listField].Placeholder = listDefault
 	fields[0].Focus()
 	return Form{
 		reader:      reader,
 		keys:        keys,
 		now:         now,
 		defaultTime: defaultTime,
-		defaultList: strings.TrimSpace(defaultList),
+		defaultList: listDefault,
 		generation:  generation,
 		id:          id,
 		fields:      fields,
@@ -255,6 +256,9 @@ func (m Form) save() (Form, tea.Cmd) {
 	title, deadlineText, description, list := m.fields[0].Value(), strings.TrimSpace(
 		m.fields[1].Value(),
 	), m.fields[2].Value(), m.fields[3].Value()
+	if strings.TrimSpace(list) == "" {
+		list = m.defaultList
+	}
 	var deadline option.Option[time.Time]
 	if deadlineText != "" {
 		d, err := dateparser.Parse(deadlineText, m.now, m.defaultTime)

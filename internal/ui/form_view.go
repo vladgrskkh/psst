@@ -22,11 +22,18 @@ func (m Form) View() string {
 		if len(lines) >= m.height {
 			break
 		}
-		text := m.fields[i].Prompt + singleLine(m.fields[i].Value())
+		value := m.fields[i].Value()
+		text := m.fields[i].Prompt + singleLine(value)
 		style := m.styles.text
+		if value == "" && m.fields[i].Placeholder != "" {
+			text = m.fields[i].Prompt + singleLine(m.fields[i].Placeholder)
+			style = m.styles.muted
+		}
 		if i == m.focus {
 			text = "> " + text
-			style = m.styles.selected
+			if value != "" {
+				style = m.styles.selected
+			}
 		}
 		lines = append(lines, m.line(text, style))
 	}
