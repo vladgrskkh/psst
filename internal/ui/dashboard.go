@@ -40,6 +40,7 @@ type Dashboard struct {
 	help          string
 	input         textinput.Model
 	query         string
+	restoreID     string
 	request       uint64
 	phase         dashboardPhase
 	deleteTarget  dashboardTarget
@@ -71,13 +72,22 @@ const (
 )
 
 const (
-	defaultWidth  = 80
-	defaultHeight = 24
-	chromeHeight  = 2
+	defaultWidth     = 80
+	defaultHeight    = 24
+	chromeHeight     = 2
+	loadingTodosText = "Loading todos…"
+	keySpace         = "space"
+	keyUp            = "up"
+	keyDown          = "down"
 )
 
 // NewDashboard constructs the dashboard with a fixed launch reference time.
-func NewDashboard(reader DashboardTodos, theme config.ThemeConfig, keys config.KeysConfig, now time.Time) Dashboard {
+func NewDashboard(
+	reader DashboardTodos,
+	theme config.ThemeConfig,
+	keys config.KeysConfig,
+	now time.Time,
+) Dashboard {
 	styles := newDashboardStyles(theme)
 	input := textinput.New()
 	input.Prompt = "Filter: "
@@ -100,7 +110,7 @@ func NewDashboard(reader DashboardTodos, theme config.ThemeConfig, keys config.K
 			Confirm:    slices.Clone(keys.Confirm),
 		},
 		styles:  styles,
-		rows:    []dashboardRow{{text: "Loading todos…", style: styles.muted}},
+		rows:    []dashboardRow{{text: loadingTodosText, style: styles.muted}},
 		cursor:  -1,
 		width:   defaultWidth,
 		height:  defaultHeight,
@@ -113,6 +123,10 @@ func NewDashboard(reader DashboardTodos, theme config.ThemeConfig, keys config.K
 // Init returns the initial snapshot-loading command.
 func (m Dashboard) Init() tea.Cmd {
 	return m.loadTodos()
+}
+
+func (m Dashboard) hasSelectedTodo() bool {
+	return m.cursor >= 0 && m.cursor < len(m.rows) && m.rows[m.cursor].selectable
 }
 
 // Err returns the unresolved mutation failure for reporting after terminal restoration.
@@ -138,6 +152,8 @@ func (m Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.request != m.request {
 			return m, nil
 		}
+		restoreID := m.restoreID
+		m.restoreID = ""
 		if m.phase == phaseReloading {
 			m.phase = phaseIdle
 		}
@@ -148,6 +164,14 @@ func (m Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}}
 		} else {
 			m.rows, m.cursor = m.dashboardRows(msg.todos)
+			if restoreID != "" {
+				for i, row := range m.rows {
+					if row.selectable && row.id == restoreID {
+						m.cursor = i
+						break
+					}
+				}
+			}
 		}
 	case todoToggled:
 		return m.finishMutation(msg.operation, msg.err, "toggle todo")
@@ -181,7 +205,7 @@ func (m Dashboard) updateFilter(msg tea.KeyMsg, name string) (tea.Model, tea.Cmd
 		m.query = strings.TrimSpace(m.input.Value())
 		m.input.Blur()
 		m.request++
-		m.rows = []dashboardRow{{text: "Loading todos…", style: m.styles.muted}}
+		m.rows = []dashboardRow{{text: loadingTodosText, style: m.styles.muted}}
 		m.cursor, m.offset = -1, 0
 		return m, m.loadTodos()
 	default:
@@ -195,7 +219,7 @@ func (m Dashboard) updateFilter(msg tea.KeyMsg, name string) (tea.Model, tea.Cmd
 func (m Dashboard) filterQuitKeys() []string {
 	var keys []string
 	for _, name := range m.keys.Quit {
-		if name != "space" && utf8.RuneCountInString(name) > 1 {
+		if name != keySpace && utf8.RuneCountInString(name) > 1 {
 			keys = append(keys, name)
 		}
 	}
@@ -243,7 +267,10 @@ func (m Dashboard) dashboardRows(todos []*domain.Todo) ([]dashboardRow, int) {
 			})
 		}
 	}
-	rows = append(rows, dashboardRow{text: fmt.Sprintf("DONE (%d) · collapsed", done), style: m.styles.muted})
+	rows = append(
+		rows,
+		dashboardRow{text: fmt.Sprintf("DONE (%d) · collapsed", done), style: m.styles.muted},
+	)
 	return rows, cursor
 }
 
