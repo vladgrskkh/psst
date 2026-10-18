@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,6 +54,104 @@ func TestNoArgsOpensDashboard(t *testing.T) {
 		t.Fatalf("dashboard output = %q", stdout.String())
 	}
 	requireClosedDatabase(t, dbPath)
+}
+
+//nolint:paralleltest,reassign // configureCLI changes environment and the test drives a real terminal stream.
+func TestNoArgsCreateEditAndCancelInTemporaryDatabase(t *testing.T) {
+	dbPath := configureCLI(t)
+	input, send, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = input.Close(); _ = send.Close() })
+	previousStdin := os.Stdin
+	os.Stdin = input
+	t.Cleanup(func() { os.Stdin = previousStdin })
+	output := &formJourneyOutput{input: send}
+	deadline := time.AfterFunc(5*time.Second, func() { _, _ = send.WriteString("\x03") })
+	defer deadline.Stop()
+	code := Execute([]string{}, output, &bytes.Buffer{})
+	if !output.created || !output.edited || !output.canceled || !output.quit || code != 0 {
+		t.Fatalf(
+			"form interaction created=%v edited=%v canceled=%v quit=%v code=%d output=%q",
+			output.created,
+			output.edited,
+			output.canceled,
+			output.quit,
+			code,
+			ansi.Strip(output.buffer.String()),
+		)
+	}
+	requireClosedDatabase(t, dbPath)
+}
+
+type formJourneyOutput struct {
+	mu                              sync.Mutex
+	buffer                          bytes.Buffer
+	input                           *os.File
+	stage                           int
+	created, edited, canceled, quit bool
+}
+
+func (o *formJourneyOutput) Write(data []byte) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	n, err := o.buffer.Write(data)
+	if err != nil {
+		return n, err
+	}
+	frame := ansi.Strip(string(data))
+	switch o.stage {
+	case 0:
+		if strings.Contains(frame, "psst") {
+			o.stage = 1
+			_, err = o.input.WriteString("n")
+		}
+	case 1:
+		if strings.Contains(frame, "New todo") {
+			o.stage = 2
+			o.after(3, "Terminal task\t\t\t\r")
+		}
+	case 3:
+		if strings.Contains(frame, "> [ ] Terminal task") {
+			o.created = true
+			o.stage = 4
+			_, err = o.input.WriteString("e")
+			o.after(5, "\x01\x0bUpdated task\r")
+		}
+	case 5:
+		if strings.Contains(frame, "> [ ] Updated task") {
+			o.edited = true
+			o.stage = 6
+			_, err = o.input.WriteString("e")
+			o.after(7, "\x1b")
+		}
+	}
+	return n, err
+}
+
+func (o *formJourneyOutput) after(next int, keys string) {
+	time.AfterFunc(150*time.Millisecond, func() {
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		if o.stage != next-1 {
+			return
+		}
+		o.stage = next
+		if _, err := o.input.WriteString(keys); err != nil {
+			return
+		}
+		if keys == "\x1b" {
+			o.canceled = true
+			time.AfterFunc(150*time.Millisecond, func() {
+				o.mu.Lock()
+				defer o.mu.Unlock()
+				o.stage = 9
+				o.quit = true
+				_, _ = o.input.WriteString("q")
+			})
+		}
+	})
 }
 
 //nolint:paralleltest // configureCLI changes the configuration environment.
@@ -179,7 +278,10 @@ func seedMismatchedTodo(t *testing.T, path string) {
 		if createErr != nil {
 			return createErr
 		}
-		return bucket.Put([]byte("stored-key"), []byte(`{"id":"missing-key","title":"broken todo"}`))
+		return bucket.Put(
+			[]byte("stored-key"),
+			[]byte(`{"id":"missing-key","title":"broken todo"}`),
+		)
 	})
 	if err != nil {
 		t.Fatal(err)

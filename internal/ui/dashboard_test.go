@@ -93,7 +93,8 @@ func TestDashboardFeedbackAndQuit(t *testing.T) {
 			cfg := config.Default()
 			m := loaded(t, &todoReader{todos: tc.todos, err: tc.err}, cfg, time.Now(), 80, 24)
 			view := ansi.Strip(m.View())
-			if !strings.Contains(view, tc.want) || (tc.done != "" && !strings.Contains(view, tc.done)) {
+			if !strings.Contains(view, tc.want) ||
+				(tc.done != "" && !strings.Contains(view, tc.done)) {
 				t.Fatalf("missing feedback %q / %q in:\n%s", tc.want, tc.done, view)
 			}
 			for _, k := range []string{"j", "down", "k", "up", "x", "space"} {
@@ -136,11 +137,27 @@ func TestDashboardCalendarGrouping(t *testing.T) {
 			todos := []*domain.Todo{
 				{ID: "later", Title: "future", Deadline: option.Some(timestamp(t, tc.later).UTC())},
 				{ID: "none", Title: "unscheduled"},
-				{ID: "tomorrow", Title: "next calendar day", Deadline: option.Some(timestamp(t, tc.tomorrow).UTC())},
-				{ID: "today", Title: "later today", Deadline: option.Some(now.Add(time.Minute).UTC())},
+				{
+					ID:       "tomorrow",
+					Title:    "next calendar day",
+					Deadline: option.Some(timestamp(t, tc.tomorrow).UTC()),
+				},
+				{
+					ID:       "today",
+					Title:    "later today",
+					Deadline: option.Some(now.Add(time.Minute).UTC()),
+				},
 				{ID: "equal", Title: "exactly now", Deadline: option.Some(now.UTC())},
-				{ID: "past", Title: "earlier today", Deadline: option.Some(now.Add(-time.Minute).UTC())},
-				{ID: "old", Title: "previous day", Deadline: option.Some(now.AddDate(0, 0, -1).UTC())},
+				{
+					ID:       "past",
+					Title:    "earlier today",
+					Deadline: option.Some(now.Add(-time.Minute).UTC()),
+				},
+				{
+					ID:       "old",
+					Title:    "previous day",
+					Deadline: option.Some(now.AddDate(0, 0, -1).UTC()),
+				},
 				{ID: "done", Title: "hidden completed", Done: true},
 				{ID: "deleted", Title: "hidden deleted", Deleted: true},
 			}
@@ -196,7 +213,13 @@ func TestDashboardNavigationAndRemaps(t *testing.T) {
 			cfg := config.Default()
 			up, down, quit := "k", "j", "q"
 			if custom {
-				cfg.Keys.Up, cfg.Keys.Down, cfg.Keys.Quit = []string{"ctrl+p"}, []string{"ctrl+n"}, []string{"esc"}
+				cfg.Keys.Up, cfg.Keys.Down, cfg.Keys.Quit = []string{
+					"ctrl+p",
+				}, []string{
+					"ctrl+n",
+				}, []string{
+					"esc",
+				}
 				up, down, quit = "ctrl+p", "ctrl+n", "esc"
 			}
 			m := loaded(t, &todoReader{todos: []*domain.Todo{
@@ -356,7 +379,8 @@ func TestDashboardTitlesOccupyOneSafeRow(t *testing.T) {
 	if !strings.Contains(view, "first second third RED link end") {
 		t.Fatalf("title was not flattened safely: %q", view)
 	}
-	if strings.ContainsAny(view, "\x1b\x00\x08\r\t") || strings.Contains(m.View(), "https://example.com") {
+	if strings.ContainsAny(view, "\x1b\x00\x08\r\t") ||
+		strings.Contains(m.View(), "https://example.com") {
 		t.Fatalf("title retained terminal controls: %q", m.View())
 	}
 	if strings.Count(view, "[ ]") != 2 {
@@ -387,20 +411,29 @@ func TestDashboardFilterSubmitsThroughCommand(t *testing.T) {
 	}
 	assertSelected(t, m, "beta")
 	if r.calls != 1 || !strings.Contains(ansi.Strip(m.View()), "Filter: qjk milk") {
-		t.Fatalf("editing should retain the snapshot and show text: calls=%d view=%s", r.calls, m.View())
+		t.Fatalf(
+			"editing should retain the snapshot and show text: calls=%d view=%s",
+			r.calls,
+			m.View(),
+		)
 	}
 	assertHelp(t, m, []string{"enter", "submit", "esc", "cancel"}, []string{"q/ctrl+c quit"})
 	m, cmd := m.Update(key("enter"))
 	if cmd == nil || r.calls != 1 || !strings.Contains(m.View(), "Loading") {
 		t.Fatalf("submit must defer I/O and show loading: calls=%d view=%s", r.calls, m.View())
 	}
-	r.todos = []*domain.Todo{{Title: "qjk milk beta"}, {Title: "qjk milk alpha"}, {Title: "done", Done: true}}
+	r.todos = []*domain.Todo{
+		{Title: "qjk milk beta"},
+		{Title: "qjk milk alpha"},
+		{Title: "done", Done: true},
+	}
 	m, _ = m.Update(cmd())
 	if r.filter != "qjk milk" || r.calls != 2 {
 		t.Fatalf("submitted List argument = %q, calls=%d", r.filter, r.calls)
 	}
 	assertSelected(t, m, "qjk milk alpha")
-	if !strings.Contains(ansi.Strip(m.View()), "Filter: qjk milk") || !strings.Contains(m.View(), "DONE (1)") {
+	if !strings.Contains(ansi.Strip(m.View()), "Filter: qjk milk") ||
+		!strings.Contains(m.View(), "DONE (1)") {
 		t.Fatalf("filtered result lost query or collapsed count: %s", m.View())
 	}
 	m, _ = m.Update(key("j"))
@@ -422,7 +455,11 @@ func TestDashboardFilterCancelRestoresAppliedView(t *testing.T) {
 	m, _ = m.Update(key(" draft"))
 	m, cmd = m.Update(key("esc"))
 	if cmd != nil || r.calls != 2 || m.View() != before {
-		t.Fatalf("cancel changed the applied view or performed I/O: calls=%d view=%s", r.calls, m.View())
+		t.Fatalf(
+			"cancel changed the applied view or performed I/O: calls=%d view=%s",
+			r.calls,
+			m.View(),
+		)
 	}
 	assertSelected(t, m, "milk beta")
 }
@@ -440,7 +477,11 @@ func TestDashboardFilterBlankClears(t *testing.T) {
 			r.todos = []*domain.Todo{{Title: "alpha"}, {Title: "milk"}}
 			m, _ = m.Update(cmd())
 			if r.filter != "" || strings.Contains(ansi.Strip(m.View()), "Filter:") {
-				t.Fatalf("blank did not clear the applied filter: query=%q view=%s", r.filter, m.View())
+				t.Fatalf(
+					"blank did not clear the applied filter: query=%q view=%s",
+					r.filter,
+					m.View(),
+				)
 			}
 			assertSelected(t, m, "alpha")
 		})
@@ -476,7 +517,13 @@ func TestDashboardFilterRemappedBindings(t *testing.T) {
 			t.Parallel()
 			cfg := config.Default()
 			cfg.Keys.Filter, cfg.Keys.Cancel = []string{filter}, []string{"ctrl+x"}
-			cfg.Keys.Up, cfg.Keys.Down, cfg.Keys.Quit = []string{"ctrl+p"}, []string{"ctrl+n"}, []string{"ctrl+c"}
+			cfg.Keys.Up, cfg.Keys.Down, cfg.Keys.Quit = []string{
+				"ctrl+p",
+			}, []string{
+				"ctrl+n",
+			}, []string{
+				"ctrl+c",
+			}
 			r := &todoReader{todos: []*domain.Todo{{Title: "alpha"}, {Title: "beta"}}}
 			m := loaded(t, r, cfg, time.Now(), 100, 24)
 			// Changing caller-owned slices must not change this model's bindings.
@@ -539,7 +586,11 @@ func TestDashboardFilterConfiguredQuitKeys(t *testing.T) {
 			m, _ = m.Update(key("space"))
 			m, _ = m.Update(key("milk"))
 			if r.calls != 1 || !strings.Contains(ansi.Strip(m.View()), "Filter: q milk") {
-				t.Fatalf("editing read data or changed the draft: calls=%d view=%s", r.calls, m.View())
+				t.Fatalf(
+					"editing read data or changed the draft: calls=%d view=%s",
+					r.calls,
+					m.View(),
+				)
 			}
 			assertHelp(t, m, []string{strings.TrimSpace(tc.binding) + " quit"},
 				[]string{"q/space", "space quit", "ctrl+c quit"})
@@ -716,7 +767,14 @@ func TestDashboardFilterFeedback(t *testing.T) {
 
 func TestDashboardFilterSmallWindows(t *testing.T) {
 	t.Parallel()
-	m := loaded(t, &todoReader{todos: []*domain.Todo{{Title: "alpha"}}}, config.Default(), time.Now(), 80, 24)
+	m := loaded(
+		t,
+		&todoReader{todos: []*domain.Todo{{Title: "alpha"}}},
+		config.Default(),
+		time.Now(),
+		80,
+		24,
+	)
 	m, _ = m.Update(key("/"))
 	m, _ = m.Update(key(strings.Repeat("界🙂", 100)))
 	for _, size := range []tea.WindowSizeMsg{
@@ -738,7 +796,10 @@ func TestDashboardFilterScrollAndCancel(t *testing.T) {
 	m := loaded(t, r, config.Default(), time.Now(), 30, 8)
 	m, cmd := submitFilter(t, m, "task")
 	for i := range 30 {
-		r.todos = append(r.todos, &domain.Todo{ID: strconv.Itoa(i), Title: fmt.Sprintf("task %02d", i)})
+		r.todos = append(
+			r.todos,
+			&domain.Todo{ID: strconv.Itoa(i), Title: fmt.Sprintf("task %02d", i)},
+		)
 	}
 	r.todos = append(r.todos, &domain.Todo{Title: "hidden done", Done: true})
 	m, _ = m.Update(cmd())
@@ -775,7 +836,13 @@ func submitFilter(t *testing.T, m tea.Model, query string) (tea.Model, tea.Cmd) 
 	return m, cmd
 }
 
-func loaded(t *testing.T, reader *todoReader, cfg *config.Config, now time.Time, width, height int) tea.Model {
+func loaded(
+	t *testing.T,
+	reader *todoReader,
+	cfg *config.Config,
+	now time.Time,
+	width, height int,
+) tea.Model {
 	t.Helper()
 	var m tea.Model = ui.NewDashboard(reader, cfg.Theme, cfg.Keys, now)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: height})
@@ -797,6 +864,8 @@ func key(name string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyCtrlC}
 	case "ctrl+n":
 		return tea.KeyMsg{Type: tea.KeyCtrlN}
+	case "ctrl+e":
+		return tea.KeyMsg{Type: tea.KeyCtrlE}
 	case "ctrl+p":
 		return tea.KeyMsg{Type: tea.KeyCtrlP}
 	case "ctrl+f":
@@ -805,6 +874,10 @@ func key(name string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyCtrlX}
 	case "ctrl+u":
 		return tea.KeyMsg{Type: tea.KeyCtrlU}
+	case "ctrl+a":
+		return tea.KeyMsg{Type: tea.KeyCtrlA}
+	case "ctrl+k":
+		return tea.KeyMsg{Type: tea.KeyCtrlK}
 	case "enter":
 		return tea.KeyMsg{Type: tea.KeyEnter}
 	case "backspace":
@@ -813,6 +886,8 @@ func key(name string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEsc}
 	case "tab":
 		return tea.KeyMsg{Type: tea.KeyTab}
+	case "shift+tab":
+		return tea.KeyMsg{Type: tea.KeyShiftTab}
 	case "space":
 		return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
 	default:

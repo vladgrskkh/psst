@@ -58,7 +58,15 @@ func newRootCommand() *cobra.Command {
 				return err
 			}
 			program := tea.NewProgram(
-				ui.NewDashboard(application.TodoService, cfg.Theme, cfg.Keys, time.Now()),
+				ui.NewRoot(
+					application.TodoService,
+					application.TodoService,
+					cfg.Theme,
+					cfg.Keys,
+					time.Now(),
+					cfg.General.DefaultList,
+					cfg.General.DefaultTime,
+				),
 				tea.WithContext(cmd.Context()),
 				tea.WithInput(cmd.InOrStdin()),
 				tea.WithOutput(cmd.OutOrStdout()),
@@ -66,8 +74,8 @@ func newRootCommand() *cobra.Command {
 			)
 			finalModel, runErr := program.Run()
 			var dashboardErr error
-			if dashboard, ok := finalModel.(ui.Dashboard); ok {
-				dashboardErr = dashboard.Err()
+			if rootModel, ok := finalModel.(ui.Root); ok {
+				dashboardErr = rootModel.Err()
 			}
 			return errors.Join(runErr, dashboardErr, application.Close())
 		},
