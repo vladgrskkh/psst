@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-16-psst-core-tui-design.md` (approved).
 
-**Status:** Slice 1 is merged at `7291aa4`, relative-date capture at `5512a32`, Slice 2 filtering at `6b0e880`, and dashboard actions at `23b13a9`. Task 4 implements the shared create/edit form and Dashboard/Form routing on `tui-form`; audit/build and independent review pass, including fixes for typed list names and printable quit keys. Later slices remain separate PRs.
+**Status:** Slice 1 is merged at `7291aa4`, relative-date capture at `5512a32`, Slice 2 filtering at `6b0e880`, and dashboard actions at `23b13a9`. Task 4 implements the shared create/edit form and Dashboard/Form routing on `tui-form`; audit/build and independent reviews pass, including fixes for typed list names, printable quit keys, and edit loading. Later slices remain separate PRs.
 
 ## Global Constraints
 
