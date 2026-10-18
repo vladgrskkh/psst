@@ -251,8 +251,8 @@ func (m Root) updateActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Root) isFormQuit(msg tea.KeyMsg) bool {
 	name := msg.String()
-	return !msg.Paste && !slices.Contains(m.keys.Cancel, name) && name != "esc" &&
-		slices.Contains(m.keys.Quit, name)
+	return !msg.Paste && (msg.Alt || (msg.Type != tea.KeyRunes && msg.Type != tea.KeySpace)) &&
+		slices.Contains(m.dashboard.filterQuitKeys(), name)
 }
 
 var _ tea.Model = Root{}

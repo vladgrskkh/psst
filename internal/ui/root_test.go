@@ -83,6 +83,67 @@ func TestRootKeepsDashboardLoadAndFilterWhileFormIsOpen(t *testing.T) {
 	}
 }
 
+func TestFormTreatsPrintableQuitBindingAsTitleInput(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 18, 12, 0, 0, 0, time.UTC)
+	cfg := config.Default()
+	cfg.Keys.Quit = []string{"q", "space", "ctrl+c"}
+	store := &memoryTodos{}
+	todos := service.NewTodoService(store, fixedClock{now})
+	root := openForm(t, ui.NewRoot(todos, todos, cfg.Theme, cfg.Keys, now, "psst", "09:00"))
+	root, cmd := root.Update(key("q"))
+	if cmd != nil {
+		if _, quit := cmd().(tea.QuitMsg); quit {
+			t.Fatal("printable q quit instead of entering the title")
+		}
+	}
+	root = typeText(root, "uick")
+	root, _ = root.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	root = typeText(root, "task")
+	if !strings.Contains(ansi.Strip(root.View()), "Title: quick task") {
+		t.Fatalf("printable quit binding was not preserved in the focused field: %s", ansi.Strip(root.View()))
+	}
+}
+
+func TestFormControlQuitBindingsAndPastedText(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.October, 18, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		keys []string
+		key  tea.KeyMsg
+	}{
+		{name: "default ctrl+c", keys: []string{"q", "ctrl+c"}, key: key("ctrl+c")},
+		{name: "configured ctrl+x", keys: []string{"ctrl+x"}, key: key("ctrl+x")},
+		{name: "configured alt+q", keys: []string{"alt+q"}, key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}, Alt: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := config.Default()
+			cfg.Keys.Quit = tc.keys
+			store := &memoryTodos{}
+			todos := service.NewTodoService(store, fixedClock{now})
+			root := openForm(t, ui.NewRoot(todos, todos, cfg.Theme, cfg.Keys, now, "psst", "09:00"))
+			_, cmd := root.Update(tc.key)
+			assertQuit(t, cmd)
+		})
+	}
+
+	cfg := config.Default()
+	store := &memoryTodos{}
+	todos := service.NewTodoService(store, fixedClock{now})
+	root := openForm(t, ui.NewRoot(todos, todos, cfg.Theme, cfg.Keys, now, "psst", "09:00"))
+	root, cmd := root.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q+uick"), Paste: true})
+	if cmd != nil {
+		if _, quit := cmd().(tea.QuitMsg); quit {
+			t.Fatal("pasted printable text triggered quit")
+		}
+	}
+	if !strings.Contains(ansi.Strip(root.View()), "Title: q+uick") {
+		t.Fatalf("paste did not remain text input: %s", ansi.Strip(root.View()))
+	}
+}
+
 func initializedRoot(
 	t *testing.T,
 	todos *service.TodoService,
